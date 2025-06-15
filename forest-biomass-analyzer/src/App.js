@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, FeatureGroup, Polygon, useMap } from 'react-leaflet';
 import { Line } from 'recharts';
 import { LineChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -171,7 +171,7 @@ const ForestBiomassApp = () => {
     }
   }, [selectedForests, forestType, startDate, endDate]);
 
-  const handleCreated = (e) => {
+  const handleCreated = useCallback((e) => {
     const layer = e.layer;
     const coords = layer.getLatLngs()[0];
     
@@ -209,15 +209,15 @@ const ForestBiomassApp = () => {
     
     console.log('Forest created:', newForest); // Debug logging
     setSelectedForests(prev => [...prev, newForest]);
-  };
+  }, [forestType, startDate]);
 
-  const handleDeleted = (e) => {
+  const handleDeleted = useCallback((e) => {
     // Simple implementation - remove last forest
     setSelectedForests(forests => forests.slice(0, -1));
     if (selectedForestIndex >= selectedForests.length - 1) {
       setSelectedForestIndex(Math.max(0, selectedForests.length - 2));
     }
-  };
+  }, [selectedForestIndex, selectedForests.length]);
 
   const getHarvestRecommendation = () => {
     if (biomassData.length === 0) return null;
