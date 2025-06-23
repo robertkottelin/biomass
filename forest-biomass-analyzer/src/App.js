@@ -215,50 +215,54 @@ const ForestBiomassApp = () => {
     return data.value || [];
   };
 
-  // Process Sentinel-2 NDVI data using Sentinel Hub Process API
+  // Process Sentinel-2 NDVI data using Sentinel Hub Statistical API
   const processSentinel2NDVI = async (product, polygon) => {
     // Extract date from product
     const acquisitionDate = new Date(product.ContentDate.Start);
     const dateStr = acquisitionDate.toISOString().split('T')[0];
     
-    // NDVI evalscript for Sentinel Hub Process API with statistical output
+    // NDVI evalscript for Statistical API - requires dataMask output
     const evalscript = `
       //VERSION=3
       function setup() {
         return {
           input: [{
-            bands: ["B04", "B08", "SCL"], // Red, NIR, Scene Classification
-            units: "DN"
+            bands: ["B04", "B08", "SCL", "dataMask"]
           }],
-          output: {
-            id: "statistics",
-            bands: 1,
-            sampleType: "FLOAT32"
-          }
+          output: [
+            {
+              id: "ndvi",
+              bands: 1
+            },
+            {
+              id: "dataMask", 
+              bands: 1
+            }
+          ]
         };
       }
       
-      function evaluatePixel(sample) {
+      function evaluatePixel(samples) {
         // Cloud masking using SCL band
         // 0: No Data, 1: Saturated/Defective, 3: Cloud shadows, 8: Cloud medium probability, 
         // 9: Cloud high probability, 10: Thin cirrus, 11: Snow/Ice
-        if ([0, 1, 3, 8, 9, 10, 11].includes(sample.SCL)) {
-          return [NaN];
-        }
+        const cloudMask = [0, 1, 3, 8, 9, 10, 11].includes(samples.SCL) ? 0 : 1;
         
         // Calculate NDVI: (NIR - Red) / (NIR + Red)
-        let ndvi = (sample.B08 - sample.B04) / (sample.B08 + sample.B04);
+        const ndvi = (samples.B08 - samples.B04) / (samples.B08 + samples.B04);
         
-        // Clamp NDVI to valid range [-1, 1]
-        return [Math.max(-1, Math.min(1, ndvi))];
+        return {
+          ndvi: [ndvi],
+          dataMask: [samples.dataMask * cloudMask]
+        };
       }
     `;
     
-    // Convert polygon to WGS84 coordinates for Process API
+    // Convert polygon to WGS84 coordinates
     const coordinates = polygon.coords.map(coord => [coord[1], coord[0]]); // lon, lat
     
-    // Process API request payload for JSON output
-    const processRequest = {
+    // Statistical API request payload
+    const statsRequest = {
       input: {
         bounds: {
           geometry: {
@@ -276,83 +280,67 @@ const ForestBiomassApp = () => {
           }
         }]
       },
-      output: {
-        width: 512,  // Increased resolution for better sampling
-        height: 512,
-        responses: [{
-          identifier: "statistics",
-          format: {
-            type: "application/json"
-          }
-        }]
+      aggregation: {
+        timeRange: {
+          from: `${dateStr}T00:00:00Z`,
+          to: `${dateStr}T23:59:59Z`
+        },
+        aggregationInterval: {
+          of: "P1D" // Daily aggregation
+        },
+        evalscript: evalscript,
+        resx: 10,
+        resy: 10
       },
-      evalscript: evalscript
+      calculations: {
+        default: {
+          statistics: {
+            default: {
+              percentiles: {
+                k: [50] // Median
+              }
+            }
+          }
+        }
+      }
     };
     
     try {
-      // Call Process API
-      const response = await fetch('https://sh.dataspace.copernicus.eu/api/v1/process', {
+      // Call Statistical API endpoint
+      const response = await fetch('https://sh.dataspace.copernicus.eu/api/v1/statistics', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${accessToken}`
         },
-        body: JSON.stringify(processRequest)
+        body: JSON.stringify(statsRequest)
       });
       
       if (!response.ok) {
-        console.error(`Process API error: ${response.status}`);
+        console.error(`Statistical API error: ${response.status}`);
         const errorText = await response.text();
         console.error('Error details:', errorText);
-        // Fallback to statistical estimation if API fails
         return estimateNDVIFromDate(acquisitionDate);
       }
       
-      // For JSON response, parse directly
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        const jsonData = await response.json();
-        // Calculate mean from JSON data if structured response
-        if (jsonData && jsonData.statistics) {
-          return jsonData.statistics.mean || estimateNDVIFromDate(acquisitionDate);
+      // Parse JSON response
+      const statsData = await response.json();
+      
+      // Extract mean NDVI from statistics
+      if (statsData && statsData.data && statsData.data.length > 0) {
+        const dayStats = statsData.data[0];
+        if (dayStats.outputs && dayStats.outputs.ndvi) {
+          const ndviStats = dayStats.outputs.ndvi.bands.B0;
+          // Use mean or median value
+          return ndviStats.stats.mean || ndviStats.stats.percentiles['50.0'] || estimateNDVIFromDate(acquisitionDate);
         }
       }
       
-      // If still TIFF response, use alternative parsing
-      const arrayBuffer = await response.arrayBuffer();
-      
-      // Simple approach: sample center pixels for NDVI estimate
-      // TIFF structure is complex, so we'll use a statistical sampling approach
-      const bytes = new Uint8Array(arrayBuffer);
-      
-      // Look for TIFF header (II or MM for little/big endian)
-      const isLittleEndian = bytes[0] === 0x49 && bytes[1] === 0x49;
-      
-      // For simplified parsing, estimate NDVI from sampling
-      let ndviSum = 0;
-      let validSamples = 0;
-      const sampleRate = 100; // Sample every 100th pixel
-      
-      // Start from offset 1024 (typical data start) and sample values
-      for (let i = 1024; i < bytes.length - 4; i += sampleRate * 4) {
-        if (i + 4 <= bytes.length) {
-          // Read float32 value
-          const dataView = new DataView(arrayBuffer, i, 4);
-          const value = dataView.getFloat32(0, isLittleEndian);
-          
-          if (!isNaN(value) && value >= -1 && value <= 1) {
-            ndviSum += value;
-            validSamples++;
-          }
-        }
-      }
-      
-      // Return mean NDVI
-      return validSamples > 0 ? ndviSum / validSamples : estimateNDVIFromDate(acquisitionDate);
+      // Fallback if no valid statistics
+      return estimateNDVIFromDate(acquisitionDate);
       
     } catch (error) {
       console.error('NDVI processing error:', error);
-      // Fallback to estimation
       return estimateNDVIFromDate(acquisitionDate);
     }
   };
