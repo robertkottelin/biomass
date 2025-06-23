@@ -104,6 +104,8 @@ const ForestBiomassApp = () => {
   const [error, setError] = useState(null);
   const [authenticated, setAuthenticated] = useState(false);
   const [accessToken, setAccessToken] = useState('');
+  const [refreshToken, setRefreshToken] = useState('');
+  const [tokenExpiry, setTokenExpiry] = useState(null);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [cloudCoverage, setCloudCoverage] = useState(20);
@@ -163,8 +165,13 @@ const ForestBiomassApp = () => {
 
       const tokenResult = await tokenResponse.json();
       setAccessToken(tokenResult.access_token);
+      setRefreshToken(tokenResult.refresh_token || '');
       setAuthenticated(true);
       setProcessingStatus('');
+      
+      // Calculate token expiry time
+      const expiryTime = Date.now() + (tokenResult.expires_in * 1000);
+      setTokenExpiry(expiryTime);
       
       console.log(`Token acquired. Expires: ${tokenResult.expires_in}s`);
     } catch (err) {
@@ -174,6 +181,60 @@ const ForestBiomassApp = () => {
         setError(`Authentication failed: ${err.message}`);
       }
       setProcessingStatus('');
+    }
+  };
+  
+  // Refresh the access token using refresh token
+  const refreshAccessToken = async () => {
+    if (!refreshToken && clientId && clientSecret) {
+      // If no refresh token but we have credentials, re-authenticate
+      console.log('No refresh token available. Re-authenticating...');
+      await authenticateCDSE();
+      return true;
+    }
+    
+    if (!refreshToken) {
+      setError('Token expired. Please re-authenticate.');
+      setAuthenticated(false);
+      return false;
+    }
+
+    try {
+      const tokenData = new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: clientId,
+        client_secret: clientSecret
+      });
+
+      const tokenResponse = await fetch('https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: tokenData
+      });
+
+      if (!tokenResponse.ok) {
+        console.error('Token refresh failed');
+        setAuthenticated(false);
+        return false;
+      }
+
+      const tokenResult = await tokenResponse.json();
+      setAccessToken(tokenResult.access_token);
+      setRefreshToken(tokenResult.refresh_token || refreshToken);
+      
+      // Update token expiry time
+      const expiryTime = Date.now() + (tokenResult.expires_in * 1000);
+      setTokenExpiry(expiryTime);
+      
+      console.log('Token refreshed successfully');
+      return true;
+    } catch (error) {
+      console.error('Token refresh error:', error);
+      setAuthenticated(false);
+      return false;
     }
   };
 
@@ -220,6 +281,15 @@ const ForestBiomassApp = () => {
     // Extract date from product
     const acquisitionDate = new Date(product.ContentDate.Start);
     const dateStr = acquisitionDate.toISOString().split('T')[0];
+    
+    // Check if token is about to expire (within 30 seconds)
+    if (tokenExpiry && Date.now() > tokenExpiry - 30000) {
+      console.log('Token about to expire, refreshing...');
+      const refreshed = await refreshAccessToken();
+      if (!refreshed) {
+        throw new Error('Failed to refresh token');
+      }
+    }
     
     // NDVI evalscript for Statistical API - requires dataMask output
     const evalscript = `
@@ -305,57 +375,77 @@ const ForestBiomassApp = () => {
       }
     };
     
-    try {
-      // Call Statistical API endpoint
-      const response = await fetch('https://sh.dataspace.copernicus.eu/api/v1/statistics', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`
-        },
-        body: JSON.stringify(statsRequest)
-      });
-      
-      if (response.status === 429) {
-        // Extract retry-after header
-        const retryAfterHeader = response.headers.get('retry-after');
-        const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader) : 5000;
+    let retryCount = 0;
+    const maxRetries = 2;
+    
+    while (retryCount <= maxRetries) {
+      try {
+        // Call Statistical API endpoint
+        const response = await fetch('https://sh.dataspace.copernicus.eu/api/v1/statistics', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`
+          },
+          body: JSON.stringify(statsRequest)
+        });
         
-        const error = new Error('Rate limit exceeded');
-        error.status = 429;
-        error.retryAfter = retryAfterMs;
-        throw error;
-      }
-      
-      if (!response.ok) {
-        console.error(`Statistical API error: ${response.status}`);
-        const errorText = await response.text();
-        console.error('Error details:', errorText);
-        return estimateNDVIFromDate(acquisitionDate);
-      }
-      
-      // Parse JSON response
-      const statsData = await response.json();
-      
-      // Extract mean NDVI from statistics
-      if (statsData && statsData.data && statsData.data.length > 0) {
-        const dayStats = statsData.data[0];
-        if (dayStats.outputs && dayStats.outputs.ndvi) {
-          const ndviStats = dayStats.outputs.ndvi.bands.B0;
-          // Use mean or median value
-          return ndviStats.stats.mean || ndviStats.stats.percentiles['50.0'] || estimateNDVIFromDate(acquisitionDate);
+        if (response.status === 401 && retryCount < maxRetries) {
+          // Token expired, try to refresh
+          console.log('Token expired, attempting refresh...');
+          const refreshed = await refreshAccessToken();
+          if (refreshed) {
+            retryCount++;
+            continue; // Retry with new token
+          } else {
+            throw new Error('Failed to refresh expired token');
+          }
         }
+        
+        if (response.status === 429) {
+          // Extract retry-after header
+          const retryAfterHeader = response.headers.get('retry-after');
+          const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader) : 5000;
+          
+          const error = new Error('Rate limit exceeded');
+          error.status = 429;
+          error.retryAfter = retryAfterMs;
+          throw error;
+        }
+        
+        if (!response.ok) {
+          console.error(`Statistical API error: ${response.status}`);
+          const errorText = await response.text();
+          console.error('Error details:', errorText);
+          return estimateNDVIFromDate(acquisitionDate);
+        }
+        
+        // Parse JSON response
+        const statsData = await response.json();
+        
+        // Extract mean NDVI from statistics
+        if (statsData && statsData.data && statsData.data.length > 0) {
+          const dayStats = statsData.data[0];
+          if (dayStats.outputs && dayStats.outputs.ndvi) {
+            const ndviStats = dayStats.outputs.ndvi.bands.B0;
+            // Use mean or median value
+            return ndviStats.stats.mean || ndviStats.stats.percentiles['50.0'] || estimateNDVIFromDate(acquisitionDate);
+          }
+        }
+        
+        // Fallback if no valid statistics
+        return estimateNDVIFromDate(acquisitionDate);
+        
+      } catch (error) {
+        if (error.status === 429) {
+          throw error; // Re-throw rate limit errors for handling upstream
+        }
+        if (retryCount >= maxRetries) {
+          console.error('NDVI processing error after retries:', error);
+          return estimateNDVIFromDate(acquisitionDate);
+        }
+        retryCount++;
       }
-      
-      // Fallback if no valid statistics
-      return estimateNDVIFromDate(acquisitionDate);
-      
-    } catch (error) {
-      if (error.status === 429) {
-        throw error; // Re-throw rate limit errors for handling upstream
-      }
-      console.error('NDVI processing error:', error);
-      return estimateNDVIFromDate(acquisitionDate);
     }
   };
   
@@ -702,9 +792,16 @@ const ForestBiomassApp = () => {
           <strong>Authentication Status:</strong>
           <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
             <li>Token acquired: {new Date().toLocaleTimeString()}</li>
-            <li>Token expiry: 600 seconds</li>
+            <li>Token expires: {tokenExpiry ? new Date(tokenExpiry).toLocaleTimeString() : 'Unknown'}</li>
+            <li>Time remaining: {tokenExpiry ? Math.max(0, Math.floor((tokenExpiry - Date.now()) / 1000)) + ' seconds' : 'Unknown'}</li>
             <li>API endpoint: catalogue.dataspace.copernicus.eu/odata/v1</li>
           </ul>
+          <button
+            style={{ ...styles.button, padding: '5px 10px', fontSize: '14px', marginTop: '10px' }}
+            onClick={refreshAccessToken}
+          >
+            Refresh Token
+          </button>
         </div>
       )}
 
