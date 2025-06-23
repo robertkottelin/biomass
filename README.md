@@ -1,47 +1,40 @@
 # Forest Biomass Analysis - Sentinel-2 Integration
 
-This React-based web application provides an interactive platform for analyzing forest biomass using satellite data from the Sentinel-2 mission, accessed via the Copernicus Data Space Ecosystem API. Users can define forest areas on a map, retrieve historical satellite imagery, calculate the Normalized Difference Vegetation Index (NDVI), estimate biomass using an empirical model, and visualize the results in a time-series graph.
+This React-based web application enables users to analyze forest biomass using real-time satellite data from the Sentinel-2 mission, accessed via the Copernicus Data Space Ecosystem API. Users can define forest areas on an interactive map, retrieve historical satellite imagery, calculate the Normalized Difference Vegetation Index (NDVI) using actual satellite bands, estimate biomass with a forest type-specific model, and visualize trends in an interactive chart.
 
 ## Table of Contents
-- [Forest Biomass Analysis - Sentinel-2 Integration](#forest-biomass-analysis---sentinel-2-integration)
-  - [Table of Contents](#table-of-contents)
-  - [Overview](#overview)
-  - [Features](#features)
-  - [Technical Architecture](#technical-architecture)
-  - [Data Retrieval](#data-retrieval)
-    - [Authentication](#authentication)
-    - [Searching Sentinel-2 Products](#searching-sentinel-2-products)
-  - [Data Processing](#data-processing)
-    - [NDVI Calculation](#ndvi-calculation)
-    - [Biomass Estimation](#biomass-estimation)
-    - [Data Sorting and Aggregation](#data-sorting-and-aggregation)
-  - [Calculations](#calculations)
-    - [Area Calculation](#area-calculation)
-    - [Growth Trend Calculation](#growth-trend-calculation)
-  - [Graph and Visualization](#graph-and-visualization)
-  - [Usage Instructions](#usage-instructions)
-  - [References](#references)
+1. [Overview](#overview)
+2. [Features](#features)
+3. [Technical Architecture](#technical-architecture)
+4. [Authentication](#authentication)
+5. [Data Retrieval](#data-retrieval)
+6. [NDVI Calculation](#ndvi-calculation)
+7. [Biomass Estimation](#biomass-estimation)
+8. [Visualization and Analysis](#visualization-and-analysis)
+9. [Usage Instructions](#usage-instructions)
+10. [References](#references)
 
 ---
 
 ## Overview
-The Forest Biomass Analysis application integrates Sentinel-2 satellite imagery to estimate forest biomass over time. It is designed for environmental researchers, forest managers, and developers interested in remote sensing applications. Key capabilities include:
-- User authentication with the Copernicus Data Space Ecosystem.
-- Interactive map-based polygon drawing to define forest areas.
-- NDVI and biomass calculations based on satellite data.
-- Visualization of historical trends and growth analysis.
+The Forest Biomass Analysis application integrates real-time Sentinel-2 satellite data to estimate forest biomass over time. It is designed for environmental researchers, forest managers, and developers interested in remote sensing applications. Key capabilities include:
+- OAuth2-based authentication with the Copernicus Data Space Ecosystem.
+- Interactive map for defining forest areas via polygon drawing.
+- Real-time NDVI calculation using Sentinel-2 bands via the Sentinel Hub Process API.
+- Biomass estimation using an empirical model tailored to specific forest types.
+- Time-series visualization with growth trend analysis.
 
 The application is built with React, Leaflet for mapping, and Recharts for data visualization, ensuring a responsive and interactive user experience.
 
 ---
 
 ## Features
-- **User Authentication**: Secure OAuth2-based login with Copernicus credentials.
+- **OAuth2 Authentication**: Secure login using client credentials stored in environment variables.
 - **Map Interface**: Leaflet-powered map with polygon drawing tools via Leaflet Draw.
-- **Forest Type Selection**: Options for pine, fir, birch, and aspen with tailored biomass parameters.
+- **Forest Type Selection**: Supports pine, fir, birch, and aspen with tailored biomass parameters.
 - **Data Retrieval**: Access to Sentinel-2 Level-2A products filtered by date, cloud coverage, and spatial extent.
-- **NDVI Calculation**: Simulated NDVI computation based on seasonal patterns (placeholder for production-grade band processing).
-- **Biomass Estimation**: Empirical exponential model converting NDVI to biomass.
+- **Real-time NDVI Calculation**: Uses Sentinel Hub Process API to compute NDVI from actual satellite bands.
+- **Biomass Estimation**: Empirical exponential model converts NDVI to biomass.
 - **Time Series Visualization**: Interactive chart displaying NDVI, biomass, and annual means.
 - **Growth Trend Analysis**: Percentage change in biomass over user-defined periods.
 
@@ -60,18 +53,21 @@ External libraries are loaded via CDN (e.g., Leaflet, Leaflet Draw, Leaflet Geom
 
 ---
 
-## Data Retrieval
-### Authentication
-- **API**: Copernicus Data Space Ecosystem API.
-- **Endpoint**: `https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token`
-- **Method**: POST with `application/x-www-form-urlencoded` content type.
-- **Parameters**:
-  - `client_id`: `cdse-public`
-  - `grant_type`: `password`
-  - `username`: User-provided Copernicus username.
-  - `password`: User-provided Copernicus password.
-- **Response**: JSON containing an `access_token`, stored in state and used for API authorization.
+## Authentication
+- **Flow**: OAuth2 Client Credentials Flow.
+- **Credentials**: Stored in environment variables `REACT_APP_CLIENT_ID` and `REACT_APP_CLIENT_SECRET`.
+- **Token Endpoint**: `https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token`
+- **Request**:
+  - Method: POST
+  - Body: `grant_type=client_credentials&client_id=<CLIENT_ID>&client_secret=<CLIENT_SECRET>`
+- **Response**: JSON containing `access_token`, used for API authorization.
+- **Token Expiry**: Typically 600 seconds (10 minutes).
 
+**Note**: Users must register on [dataspace.copernicus.eu](https://dataspace.copernicus.eu/) and create OAuth2 client credentials in their user settings.
+
+---
+
+## Data Retrieval
 ### Searching Sentinel-2 Products
 - **API Endpoint**: `https://catalogue.dataspace.copernicus.eu/odata/v1/Products`
 - **Query Construction**:
@@ -90,31 +86,29 @@ External libraries are loaded via CDN (e.g., Leaflet, Leaflet Draw, Leaflet Geom
 
 ---
 
-## Data Processing
-### NDVI Calculation
-NDVI is typically calculated as:
+## NDVI Calculation
+NDVI is calculated using real-time satellite data via the **Sentinel Hub Process API**:
+- **API Endpoint**: `https://sh.dataspace.copernicus.eu/api/v1/process`
+- **Evalscript**:
+  - **Input Bands**: `B04` (Red), `B08` (NIR), `SCL` (Scene Classification Layer).
+  - **Cloud Masking**: Uses SCL to filter out clouds, shadows, and snow (classes 0, 1, 3, 8, 9, 10, 11).
+  - **NDVI Formula**:
+    \[
+    \text{NDVI} = \frac{\text{B08} - \text{B04}}{\text{B08} + \text{B04}}
+    \]
+  - **Output**: Single-band float32 GeoTIFF with NDVI values, NaN for masked pixels.
+- **Processing**:
+  - The API request includes the user-defined polygon and date range.
+  - The response is a GeoTIFF, from which the mean NDVI is calculated by averaging valid (non-NaN) pixel values.
+- **Note**: NDVI is not simulated; it is computed directly from Sentinel-2 imagery. A fallback to a seasonal model is used only if the API fails, but the primary method relies on real-time data.
 
-\[
-\text{NDVI} = \frac{\text{NIR} - \text{R}}{\text{NIR} + \text{R}}
-\]
+---
 
-- **Bands**:
-  - **NIR**: Sentinel-2 Band 8 (Near-Infrared, 10m resolution).
-  - **R**: Sentinel-2 Band 4 (Red, 10m resolution).
-- **Current Implementation**: Due to web environment constraints, NDVI is simulated using a seasonal sine wave model with random variation:
-  - Day of year approximated as `(month - 1) * 30 + day`.
-  - Seasonal factor: `0.3 * sin(2 * π * (dayOfYear - 80) / 365) + 0.5`.
-  - Random variation: `±0.1`.
-  - Clamped to `[0, 1]`.
-- **Production Note**: Full implementation requires downloading products and processing with `rasterio` or accessing bands via the Sentinel Hub Process API.
-
-### Biomass Estimation
+## Biomass Estimation
 Biomass is derived from NDVI using an empirical exponential model:
-
 \[
 \text{biomass} = a \times e^{b \times \text{NDVI}} \times \frac{\text{maxBiomass}}{10}
 \]
-
 - **Parameters** (stored in `forestParams`):
   - **Pine**: `{ maxBiomass: 350, a: 0.7, b: 1.2 }`
   - **Fir**: `{ maxBiomass: 400, a: 0.75, b: 1.15 }`
@@ -122,41 +116,9 @@ Biomass is derived from NDVI using an empirical exponential model:
   - **Aspen**: `{ maxBiomass: 200, a: 0.6, b: 1.35 }`
 - **Units**: Biomass in tons/ha, scaled by forest type-specific maximum biomass.
 
-### Data Sorting and Aggregation
-- **Sorting**: Biomass data is sorted by `date` using JavaScript’s `sort` with a date comparison.
-- **Annual Means**: Biomass values are grouped by year, and the mean is calculated:
-  - `yearlyBiomass[year]` accumulates biomass values.
-  - Mean per year: `sum / count`.
-  - Added to each data point as `biomassMean`.
-
 ---
 
-## Calculations
-### Area Calculation
-Polygon area is computed in hectares:
-1. **Primary Method**: `L.GeometryUtil.geodesicArea(coords) / 10000` (if Leaflet GeometryUtil is loaded).
-2. **Fallback Method**: Shoelace formula adjusted for latitude:
-   \[
-   \text{area} = \left| \sum_{i=0}^{n-1} (\text{lat}_i \times \text{lng}_{i+1} - \text{lat}_{i+1} \times \text{lng}_i) \right| \times 111319.9^2 \times \cos(\text{lat}_0) / 2 / 10000
-   \]
-   - `111319.9`: Degrees to meters conversion factor.
-   - `cos(lat0)`: Adjusts for latitude distortion.
-   - Result formatted to 2 decimal places.
-
-### Growth Trend Calculation
-The growth trend is the percentage change in mean biomass over a selected period:
-\[
-\text{trend} = \left( \frac{\text{lastYearMean} - \text{firstYearMean}}{\text{firstYearMean}} \times 100 \right)\%
-\]
-- **Steps**:
-  1. Filter data by `trendStartDate` and `trendEndDate` (defaults to full range if unset).
-  2. Group by year and compute mean biomass per year.
-  3. Extract first and last year means.
-  4. Calculate percentage change, displayed with years and values (e.g., "12.3% (2015-2023, from 200.0 to 224.6 tons/ha)").
-
----
-
-## Graph and Visualization
+## Visualization and Analysis
 The application uses `recharts` to render an interactive `LineChart`:
 - **Setup**:
   - Wrapped in `ResponsiveContainer` for dynamic sizing (100% width, 400px height).
@@ -173,15 +135,34 @@ The application uses `recharts` to render an interactive `LineChart`:
 - **Legend**: Identifies each series by name.
 - **Interactivity**: Users can set `trendStartDate` and `trendEndDate` via date inputs to filter the growth trend calculation.
 
+### Growth Trend Calculation
+The growth trend is the percentage change in mean biomass over a selected period:
+\[
+\text{trend} = \left( \frac{\text{lastYearMean} - \text{firstYearMean}}{\text{firstYearMean}} \times 100 \right)\%
+\]
+- **Steps**:
+  1. Filter data by `trendStartDate` and `trendEndDate` (defaults to full range if unset).
+  2. Group by year and compute mean biomass per year.
+  3. Extract first and last year means.
+  4. Calculate percentage change, displayed with years and values (e.g., "12.3% (2015-2023, from 200.0 to 224.6 tons/ha)").
+
 ---
 
 ## Usage Instructions
-1. **Authenticate**: Enter Copernicus credentials and click "Authenticate with CDSE."
-2. **Select Forest Type**: Choose from pine, fir, birch, or aspen in the dropdown.
-3. **Draw Polygon**: Use the map’s drawing tool to outline a forest area.
-4. **Fetch Data**: Click "Analyze Full Sentinel-2 Archive" to retrieve and process data.
-5. **View Results**: Explore the chart with NDVI, biomass, and annual means.
-6. **Analyze Trends**: Set a date range to compute the biomass growth trend.
+1. **Set Up OAuth2 Credentials**:
+   - Register on [dataspace.copernicus.eu](https://dataspace.copernicus.eu/).
+   - Create OAuth2 client credentials in User Settings.
+   - Add to `.env` file:
+     ```
+     REACT_APP_CLIENT_ID=your_client_id
+     REACT_APP_CLIENT_SECRET=your_client_secret
+     ```
+2. **Authenticate**: Click "Authenticate with CDSE" (credentials are sourced from `.env`).
+3. **Select Forest Type**: Choose from pine, fir, birch, or aspen.
+4. **Draw Polygon**: Use the map’s drawing tool to outline a forest area.
+5. **Fetch Data**: Click "Analyze Full Sentinel-2 Archive" to retrieve and process data.
+6. **View Results**: Explore the chart with NDVI, biomass, and annual means.
+7. **Analyze Trends**: Set a date range to compute the biomass growth trend.
 
 ---
 
