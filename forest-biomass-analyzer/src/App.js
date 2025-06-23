@@ -103,8 +103,6 @@ const ForestBiomassApp = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [authenticated, setAuthenticated] = useState(false);
-  const [accessToken, setAccessToken] = useState('');
-  const [tokenExpiry, setTokenExpiry] = useState(null);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [cloudCoverage, setCloudCoverage] = useState(20);
@@ -113,10 +111,16 @@ const ForestBiomassApp = () => {
   const [trendEndDate, setTrendEndDate] = useState('');
   const mapRef = useRef();
   
-  // Global rate limit and auth state
+  // Use refs to avoid stale closure issues with token management
+  const authRef = useRef({
+    accessToken: '',
+    tokenExpiry: null,
+    isAuthenticating: false,
+    lastAuthTime: 0
+  });
+  
+  // Global rate limit state
   const [rateLimitExpiry, setRateLimitExpiry] = useState(0);
-  const [lastAuthTime, setLastAuthTime] = useState(0);
-  const isAuthenticatingRef = useRef(false);
 
   // Load GeometryUtil on mount
   useEffect(() => {
@@ -137,17 +141,28 @@ const ForestBiomassApp = () => {
     return params.a * Math.exp(params.b * ndvi) * params.maxBiomass / 10;
   };
 
+  // Get current access token from ref
+  const getAccessToken = () => authRef.current.accessToken;
+
+  // Check if token is valid using ref
+  const isTokenValid = () => {
+    const now = Date.now();
+    return authRef.current.accessToken && 
+           authRef.current.tokenExpiry && 
+           now < authRef.current.tokenExpiry;
+  };
+
   // Authenticate with Copernicus Data Space Ecosystem
   const authenticateCDSE = async () => {
     // Prevent concurrent authentication attempts
-    if (isAuthenticatingRef.current) {
+    if (authRef.current.isAuthenticating) {
       console.log('Authentication already in progress');
       return false;
     }
     
     // Prevent rapid re-authentication (minimum 5 second gap)
     const now = Date.now();
-    if (now - lastAuthTime < 5000) {
+    if (now - authRef.current.lastAuthTime < 5000) {
       console.log('Too soon to re-authenticate');
       return false;
     }
@@ -157,8 +172,8 @@ const ForestBiomassApp = () => {
       return false;
     }
 
-    isAuthenticatingRef.current = true;
-    setLastAuthTime(now);
+    authRef.current.isAuthenticating = true;
+    authRef.current.lastAuthTime = now;
     setError(null);
     setProcessingStatus('Authenticating...');
 
@@ -183,16 +198,16 @@ const ForestBiomassApp = () => {
       }
 
       const tokenResult = await tokenResponse.json();
-      setAccessToken(tokenResult.access_token);
+      
+      // Update auth ref with new token data
+      authRef.current.accessToken = tokenResult.access_token;
+      // Calculate token expiry with 60 second safety margin
+      authRef.current.tokenExpiry = Date.now() + ((tokenResult.expires_in - 60) * 1000);
+      
       setAuthenticated(true);
       setProcessingStatus('');
       
-      // Calculate token expiry with 60 second safety margin
-      // Token expires_in is in seconds, convert to milliseconds
-      const expiryTime = Date.now() + ((tokenResult.expires_in - 60) * 1000);
-      setTokenExpiry(expiryTime);
-      
-      console.log(`Token acquired. Expires in: ${tokenResult.expires_in}s (${new Date(expiryTime).toLocaleTimeString()})`);
+      console.log(`Token acquired. Expires in: ${tokenResult.expires_in}s (${new Date(authRef.current.tokenExpiry).toLocaleTimeString()})`);
       return true;
     } catch (err) {
       if (err.message.includes('Failed to fetch')) {
@@ -203,20 +218,14 @@ const ForestBiomassApp = () => {
       setProcessingStatus('');
       return false;
     } finally {
-      isAuthenticatingRef.current = false;
+      authRef.current.isAuthenticating = false;
     }
   };
   
-  // Re-authenticate when token expires (client credentials flow has no refresh tokens)
+  // Re-authenticate when token expires
   const reauthenticate = async () => {
     console.log('Re-authenticating with client credentials...');
     return await authenticateCDSE();
-  };
-  
-  // Check if token is valid
-  const isTokenValid = () => {
-    if (!accessToken || !tokenExpiry) return false;
-    return Date.now() < tokenExpiry;
   };
   
   // Ensure valid token before API calls
@@ -252,7 +261,7 @@ const ForestBiomassApp = () => {
 
     const response = await fetch(searchUrl, {
       headers: {
-        'Authorization': `Bearer ${accessToken}`
+        'Authorization': `Bearer ${getAccessToken()}`
       }
     });
 
@@ -263,7 +272,7 @@ const ForestBiomassApp = () => {
         // Retry with new token
         const retryResponse = await fetch(searchUrl, {
           headers: {
-            'Authorization': `Bearer ${accessToken}`
+            'Authorization': `Bearer ${getAccessToken()}`
           }
         });
         
@@ -388,7 +397,7 @@ const ForestBiomassApp = () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`
+            'Authorization': `Bearer ${getAccessToken()}`
           },
           body: JSON.stringify(statsRequest)
         });
@@ -791,13 +800,13 @@ const ForestBiomassApp = () => {
         </div>
       )}
 
-      {authenticated && accessToken && (
+      {authenticated && authRef.current.accessToken && (
         <div style={styles.info}>
           <strong>Authentication Status:</strong>
           <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
             <li>Token acquired: {new Date().toLocaleTimeString()}</li>
-            <li>Token expires: {tokenExpiry ? new Date(tokenExpiry).toLocaleTimeString() : 'Unknown'}</li>
-            <li>Time remaining: {tokenExpiry && isTokenValid() ? Math.max(0, Math.floor((tokenExpiry - Date.now()) / 1000)) + ' seconds' : 'Expired'}</li>
+            <li>Token expires: {authRef.current.tokenExpiry ? new Date(authRef.current.tokenExpiry).toLocaleTimeString() : 'Unknown'}</li>
+            <li>Time remaining: {authRef.current.tokenExpiry && isTokenValid() ? Math.max(0, Math.floor((authRef.current.tokenExpiry - Date.now()) / 1000)) + ' seconds' : 'Expired'}</li>
             <li>API endpoint: catalogue.dataspace.copernicus.eu/odata/v1</li>
           </ul>
         </div>
@@ -852,12 +861,11 @@ protocol/openid-connect/token`}
               placeholder="Paste access token if CORS blocked"
               onChange={(e) => {
                 if (e.target.value) {
-                  setAccessToken(e.target.value);
+                  // Update ref instead of state to avoid stale closures
+                  authRef.current.accessToken = e.target.value;
+                  authRef.current.tokenExpiry = Date.now() + (540 * 1000); // 9 minutes
+                  authRef.current.lastAuthTime = Date.now();
                   setAuthenticated(true);
-                  // Set token expiry to 9 minutes from now (540 seconds)
-                  const expiry = Date.now() + (540 * 1000);
-                  setTokenExpiry(expiry);
-                  setLastAuthTime(Date.now());
                 }
               }}
               disabled={authenticated}
@@ -1161,7 +1169,8 @@ protocol/openid-connect/token`}
           <li>Authentication: OAuth2 Client Credentials Flow (no refresh tokens)</li>
           <li>Token endpoint: https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token</li>
           <li>Grant type: client_credentials (access token: 600s expiry)</li>
-          <li>Token management: Automatic re-authentication on expiry, no refresh token support</li>
+          <li>Token management: Using ref to avoid stale closure issues</li>
+          <li>Stale closure prevention: authRef.current stores mutable token state</li>
           <li>Re-authentication protection: Minimum 5s gap, mutex to prevent concurrent auth</li>
           <li>Rate limiting: Global rate limit tracking with exponential backoff (base: 3s, max: 30s)</li>
           <li>API resilience: Token validation before requests, 401 retry with re-authentication</li>
