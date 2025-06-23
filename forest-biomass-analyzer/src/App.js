@@ -732,6 +732,11 @@ const ForestBiomassApp = () => {
                         <p style={{ margin: '2px 0', fontSize: '12px' }}>
                           Biomass: {data.biomass.toFixed(1)} tons/ha
                         </p>
+                        {data.biomassMean && (
+                          <p style={{ margin: '2px 0', fontSize: '12px', color: '#ff0000', fontWeight: 'bold' }}>
+                            Annual Mean: {data.biomassMean.toFixed(1)} tons/ha
+                          </p>
+                        )}
                         <p style={{ margin: '2px 0', fontSize: '12px', color: '#666' }}>
                           Cloud Cover: {data.cloudCover.toFixed(1)}%
                         </p>
