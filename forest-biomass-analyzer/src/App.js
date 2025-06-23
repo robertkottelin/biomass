@@ -104,9 +104,7 @@ const ForestBiomassApp = () => {
   const [error, setError] = useState(null);
   const [authenticated, setAuthenticated] = useState(false);
   const [accessToken, setAccessToken] = useState('');
-  const [refreshToken, setRefreshToken] = useState('');
   const [tokenExpiry, setTokenExpiry] = useState(null);
-  const [refreshTokenExpiry, setRefreshTokenExpiry] = useState(null);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [cloudCoverage, setCloudCoverage] = useState(20);
@@ -115,8 +113,10 @@ const ForestBiomassApp = () => {
   const [trendEndDate, setTrendEndDate] = useState('');
   const mapRef = useRef();
   
-  // Global rate limit state
+  // Global rate limit and auth state
   const [rateLimitExpiry, setRateLimitExpiry] = useState(0);
+  const [lastAuthTime, setLastAuthTime] = useState(0);
+  const isAuthenticatingRef = useRef(false);
 
   // Load GeometryUtil on mount
   useEffect(() => {
@@ -139,11 +139,26 @@ const ForestBiomassApp = () => {
 
   // Authenticate with Copernicus Data Space Ecosystem
   const authenticateCDSE = async () => {
+    // Prevent concurrent authentication attempts
+    if (isAuthenticatingRef.current) {
+      console.log('Authentication already in progress');
+      return false;
+    }
+    
+    // Prevent rapid re-authentication (minimum 5 second gap)
+    const now = Date.now();
+    if (now - lastAuthTime < 5000) {
+      console.log('Too soon to re-authenticate');
+      return false;
+    }
+    
     if (!clientId || !clientSecret) {
       setError('Missing credentials: Client ID and Client Secret required');
       return false;
     }
 
+    isAuthenticatingRef.current = true;
+    setLastAuthTime(now);
     setError(null);
     setProcessingStatus('Authenticating...');
 
@@ -169,21 +184,15 @@ const ForestBiomassApp = () => {
 
       const tokenResult = await tokenResponse.json();
       setAccessToken(tokenResult.access_token);
-      setRefreshToken(tokenResult.refresh_token || ''); // Client credentials may include refresh token
       setAuthenticated(true);
       setProcessingStatus('');
       
-      // Calculate token expiry times with safety margin
-      const expiryTime = Date.now() + ((tokenResult.expires_in - 30) * 1000); // 30s safety margin
+      // Calculate token expiry with 60 second safety margin
+      // Token expires_in is in seconds, convert to milliseconds
+      const expiryTime = Date.now() + ((tokenResult.expires_in - 60) * 1000);
       setTokenExpiry(expiryTime);
       
-      // Set refresh token expiry if refresh token exists
-      if (tokenResult.refresh_token && tokenResult.refresh_expires_in) {
-        const refreshExpiry = Date.now() + ((tokenResult.refresh_expires_in - 60) * 1000); // 60s safety margin
-        setRefreshTokenExpiry(refreshExpiry);
-      }
-      
-      console.log(`Token acquired. Access expires in: ${tokenResult.expires_in}s, Refresh expires in: ${tokenResult.refresh_expires_in || 'N/A'}s`);
+      console.log(`Token acquired. Expires in: ${tokenResult.expires_in}s (${new Date(expiryTime).toLocaleTimeString()})`);
       return true;
     } catch (err) {
       if (err.message.includes('Failed to fetch')) {
@@ -193,57 +202,28 @@ const ForestBiomassApp = () => {
       }
       setProcessingStatus('');
       return false;
+    } finally {
+      isAuthenticatingRef.current = false;
     }
   };
   
-  // Refresh access token using refresh token
-  const refreshAccessToken = async () => {
-    // If we have a refresh token, try to use it
-    if (refreshToken && refreshTokenExpiry && Date.now() < refreshTokenExpiry) {
-      try {
-        const tokenData = new URLSearchParams({
-          grant_type: 'refresh_token',
-          refresh_token: refreshToken,
-          client_id: 'cdse-public' // Public client ID for refresh
-        });
-
-        const tokenResponse = await fetch('https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: tokenData
-        });
-
-        if (tokenResponse.ok) {
-          const tokenResult = await tokenResponse.json();
-          setAccessToken(tokenResult.access_token);
-          if (tokenResult.refresh_token) {
-            setRefreshToken(tokenResult.refresh_token);
-          }
-          
-          // Update token expiry
-          const expiryTime = Date.now() + ((tokenResult.expires_in - 30) * 1000);
-          setTokenExpiry(expiryTime);
-          
-          console.log('Token refreshed successfully');
-          return true;
-        }
-      } catch (error) {
-        console.error('Refresh token failed:', error);
-      }
-    }
-    
-    // Fallback to re-authentication with client credentials
-    console.log('Refresh token unavailable or expired. Re-authenticating...');
+  // Re-authenticate when token expires (client credentials flow has no refresh tokens)
+  const reauthenticate = async () => {
+    console.log('Re-authenticating with client credentials...');
     return await authenticateCDSE();
   };
   
-  // Check and refresh token if needed
+  // Check if token is valid
+  const isTokenValid = () => {
+    if (!accessToken || !tokenExpiry) return false;
+    return Date.now() < tokenExpiry;
+  };
+  
+  // Ensure valid token before API calls
   const ensureValidToken = async () => {
-    if (!tokenExpiry || Date.now() > tokenExpiry) {
-      console.log('Token expired or missing. Refreshing...');
-      return await refreshAccessToken();
+    if (!isTokenValid()) {
+      console.log('Token expired or missing. Re-authenticating...');
+      return await reauthenticate();
     }
     return true;
   };
@@ -256,12 +236,10 @@ const ForestBiomassApp = () => {
     }
     
     const coords = polygon.coords.map(coord => [coord[1], coord[0]]); // Convert to lon,lat
-
-    // Create WKT polygon string - ensure it's closed (first and last point must be same)
     const coordsString = [...coords, coords[0]].map(c => `${c[0]} ${c[1]}`).join(',');
     const wktPolygon = `POLYGON((${coordsString}))`;
 
-    // Build filter string components
+    // Build filter string
     const collectionFilter = `Collection/Name eq 'SENTINEL-2'`;
     const spatialFilter = `OData.CSC.Intersects(area=geography'SRID=4326;${wktPolygon}')`;
     const dateStartFilter = `ContentDate/Start gt ${startDate}T00:00:00.000Z`;
@@ -269,10 +247,7 @@ const ForestBiomassApp = () => {
     const cloudFilter = `Attributes/OData.CSC.DoubleAttribute/any(att:att/Name eq 'cloudCover' and att/OData.CSC.DoubleAttribute/Value le ${cloudCoverage}.00)`;
     const productTypeFilter = `Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/OData.CSC.StringAttribute/Value eq 'S2MSI2A')`;
 
-    // Combine filters
     const filterQuery = `${collectionFilter} and ${spatialFilter} and ${dateStartFilter} and ${dateEndFilter} and ${cloudFilter} and ${productTypeFilter}`;
-
-    // OData query URL
     const searchUrl = `https://catalogue.dataspace.copernicus.eu/odata/v1/Products?$filter=${encodeURIComponent(filterQuery)}&$orderby=ContentDate/Start&$top=100`;
 
     const response = await fetch(searchUrl, {
@@ -282,9 +257,9 @@ const ForestBiomassApp = () => {
     });
 
     if (response.status === 401) {
-      // Token expired, try to refresh and retry
-      console.log('Search returned 401. Refreshing token...');
-      if (await refreshAccessToken()) {
+      // Token expired, try to re-authenticate once
+      console.log('Search returned 401. Re-authenticating...');
+      if (await reauthenticate()) {
         // Retry with new token
         const retryResponse = await fetch(searchUrl, {
           headers: {
@@ -293,7 +268,7 @@ const ForestBiomassApp = () => {
         });
         
         if (!retryResponse.ok) {
-          throw new Error(`Search failed after token refresh: ${retryResponse.status}`);
+          throw new Error(`Search failed after re-authentication: ${retryResponse.status}`);
         }
         
         const data = await retryResponse.json();
@@ -315,16 +290,10 @@ const ForestBiomassApp = () => {
 
   // Process Sentinel-2 NDVI data using Sentinel Hub Statistical API
   const processSentinel2NDVI = async (product, polygon) => {
-    // Ensure valid token before API call
-    if (!await ensureValidToken()) {
-      throw new Error('Failed to obtain valid token');
-    }
-    
-    // Extract date from product
     const acquisitionDate = new Date(product.ContentDate.Start);
     const dateStr = acquisitionDate.toISOString().split('T')[0];
     
-    // NDVI evalscript for Statistical API - requires dataMask output
+    // NDVI evalscript for Statistical API
     const evalscript = `
       //VERSION=3
       function setup() {
@@ -347,11 +316,9 @@ const ForestBiomassApp = () => {
       
       function evaluatePixel(samples) {
         // Cloud masking using SCL band
-        // 0: No Data, 1: Saturated/Defective, 3: Cloud shadows, 8: Cloud medium probability, 
-        // 9: Cloud high probability, 10: Thin cirrus, 11: Snow/Ice
         const cloudMask = [0, 1, 3, 8, 9, 10, 11].includes(samples.SCL) ? 0 : 1;
         
-        // Calculate NDVI: (NIR - Red) / (NIR + Red)
+        // Calculate NDVI
         const ndvi = (samples.B08 - samples.B04) / (samples.B08 + samples.B04);
         
         return {
@@ -361,7 +328,6 @@ const ForestBiomassApp = () => {
       }
     `;
     
-    // Convert polygon to WGS84 coordinates
     const coordinates = polygon.coords.map(coord => [coord[1], coord[0]]); // lon, lat
     
     // Statistical API request payload
@@ -370,7 +336,7 @@ const ForestBiomassApp = () => {
         bounds: {
           geometry: {
             type: "Polygon",
-            coordinates: [[...coordinates, coordinates[0]]] // Ensure closed polygon
+            coordinates: [[...coordinates, coordinates[0]]]
           }
         },
         data: [{
@@ -389,7 +355,7 @@ const ForestBiomassApp = () => {
           to: `${dateStr}T23:59:59Z`
         },
         aggregationInterval: {
-          of: "P1D" // Daily aggregation
+          of: "P1D"
         },
         evalscript: evalscript,
         resx: 10,
@@ -400,7 +366,7 @@ const ForestBiomassApp = () => {
           statistics: {
             default: {
               percentiles: {
-                k: [50] // Median
+                k: [50]
               }
             }
           }
@@ -413,7 +379,11 @@ const ForestBiomassApp = () => {
     
     while (retries < maxRetries) {
       try {
-        // Call Statistical API endpoint
+        // Ensure valid token before API call
+        if (!isTokenValid() && !(await reauthenticate())) {
+          throw new Error('Failed to obtain valid token');
+        }
+        
         const response = await fetch('https://sh.dataspace.copernicus.eu/api/v1/statistics', {
           method: 'POST',
           headers: {
@@ -423,19 +393,19 @@ const ForestBiomassApp = () => {
           body: JSON.stringify(statsRequest)
         });
         
-        if (response.status === 401) {
-          // Token expired, refresh and retry
-          console.log('Statistical API returned 401. Refreshing token...');
-          if (await refreshAccessToken()) {
+        if (response.status === 401 && retries < maxRetries - 1) {
+          // Token expired, re-authenticate and retry
+          console.log('Statistical API returned 401. Re-authenticating...');
+          if (await reauthenticate()) {
             retries++;
-            continue; // Retry with new token
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Short delay before retry
+            continue;
           } else {
-            throw new Error('Failed to refresh token');
+            throw new Error('Failed to re-authenticate');
           }
         }
         
         if (response.status === 429) {
-          // Extract retry-after header
           const retryAfterHeader = response.headers.get('retry-after');
           const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader) * 1000 : 10000;
           
@@ -452,38 +422,33 @@ const ForestBiomassApp = () => {
           return estimateNDVIFromDate(acquisitionDate);
         }
         
-        // Parse JSON response
         const statsData = await response.json();
         
-        // Extract mean NDVI from statistics
         if (statsData && statsData.data && statsData.data.length > 0) {
           const dayStats = statsData.data[0];
           if (dayStats.outputs && dayStats.outputs.ndvi) {
             const ndviStats = dayStats.outputs.ndvi.bands.B0;
-            // Use mean or median value
             return ndviStats.stats.mean || ndviStats.stats.percentiles['50.0'] || estimateNDVIFromDate(acquisitionDate);
           }
         }
         
-        // Fallback if no valid statistics
         return estimateNDVIFromDate(acquisitionDate);
         
       } catch (error) {
         if (error.status === 429) {
-          throw error; // Re-throw rate limit errors for handling upstream
+          throw error; // Re-throw rate limit errors
         }
         if (retries >= maxRetries - 1) {
           console.error('NDVI processing error after retries:', error);
           return estimateNDVIFromDate(acquisitionDate);
         }
         retries++;
-        // Add delay before retry
-        await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+        await new Promise(resolve => setTimeout(resolve, 2000 * retries)); // Exponential backoff
       }
     }
   };
   
-  // Fallback NDVI estimation based on date (for API failures)
+  // Fallback NDVI estimation based on date
   const estimateNDVIFromDate = (date) => {
     const month = date.getMonth() + 1;
     const day = date.getDate();
@@ -506,6 +471,16 @@ const ForestBiomassApp = () => {
       return;
     }
 
+    // Ensure token is valid before starting
+    if (!isTokenValid()) {
+      setProcessingStatus('Token expired. Re-authenticating...');
+      const success = await reauthenticate();
+      if (!success) {
+        setError('Re-authentication failed. Please enter credentials again.');
+        return;
+      }
+    }
+
     setLoading(true);
     setError(null);
     setBiomassData([]);
@@ -513,12 +488,10 @@ const ForestBiomassApp = () => {
 
     try {
       const selectedForest = selectedForests[selectedForestIndex];
-
-      // Sentinel-2 data available from July 2015
       const endDate = new Date().toISOString().split('T')[0];
-      const startDate = '2015-07-01'; // First Sentinel-2A data availability
+      const startDate = '2015-07-01';
 
-      // Batch requests by year to manage large datasets
+      // Batch requests by year
       const startYear = 2015;
       const endYear = new Date().getFullYear();
       const allProducts = [];
@@ -533,13 +506,11 @@ const ForestBiomassApp = () => {
           const yearProducts = await searchSentinel2Products(selectedForest, yearStart, yearEnd);
           allProducts.push(...yearProducts);
 
-          // Implement rate limiting to avoid API throttling
           if (year < endYear) {
-            await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay between requests
+            await new Promise(resolve => setTimeout(resolve, 500));
           }
         } catch (err) {
           console.warn(`Failed to fetch data for ${year}:`, err);
-          // Continue with other years even if one fails
         }
       }
 
@@ -550,15 +521,15 @@ const ForestBiomassApp = () => {
 
       setProcessingStatus(`Found ${allProducts.length} products. Processing NDVI...`);
 
-      // Process products to extract NDVI with rate limiting
+      // Process products with rate limiting
       const biomassResults = [];
-      const batchSize = 5; // Reduced to avoid rate limits
-      const baseDelay = 3000; // 3 second base delay between requests
+      const batchSize = 5;
+      const baseDelay = 3000;
 
       for (let i = 0; i < allProducts.length; i += batchSize) {
         const batch = allProducts.slice(i, i + batchSize);
 
-        // Check if we need to wait for rate limit to expire
+        // Check rate limit
         const now = Date.now();
         if (rateLimitExpiry > now) {
           const waitTime = rateLimitExpiry - now;
@@ -569,27 +540,22 @@ const ForestBiomassApp = () => {
         for (const product of batch) {
           const date = new Date(product.ContentDate.Start).toISOString().split('T')[0];
 
-          // Implement exponential backoff for rate limiting
           let retries = 0;
           let ndviValue = null;
           
           while (retries < 3 && ndviValue === null) {
             try {
-              // Add base delay between requests
               if (retries === 0) {
                 await new Promise(resolve => setTimeout(resolve, baseDelay));
               } else {
-                // Exponential backoff for retries
                 const backoffDelay = Math.min(baseDelay * Math.pow(2, retries), 30000);
                 await new Promise(resolve => setTimeout(resolve, backoffDelay));
               }
 
-              // Extract NDVI using Statistical API
               ndviValue = await processSentinel2NDVI(product, selectedForest);
               
             } catch (error) {
               if (error.status === 429 && error.retryAfter) {
-                // Update global rate limit expiry
                 setRateLimitExpiry(Date.now() + error.retryAfter);
                 console.log(`Rate limited. Will retry after ${error.retryAfter}ms`);
               }
@@ -604,7 +570,6 @@ const ForestBiomassApp = () => {
           
           const biomass = ndviToBiomass(ndviValue, selectedForest.type);
 
-          // Extract cloud cover from attributes
           const cloudCoverAttr = product.Attributes?.find(attr =>
             attr.Name === 'cloudCover' && attr.ValueType === 'Double'
           );
@@ -831,9 +796,8 @@ const ForestBiomassApp = () => {
           <strong>Authentication Status:</strong>
           <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
             <li>Token acquired: {new Date().toLocaleTimeString()}</li>
-            <li>Access token expires: {tokenExpiry ? new Date(tokenExpiry).toLocaleTimeString() : 'Unknown'}</li>
-            <li>Refresh token expires: {refreshTokenExpiry ? new Date(refreshTokenExpiry).toLocaleTimeString() : 'N/A'}</li>
-            <li>Time remaining: {tokenExpiry ? Math.max(0, Math.floor((tokenExpiry - Date.now()) / 1000)) + ' seconds' : 'Unknown'}</li>
+            <li>Token expires: {tokenExpiry ? new Date(tokenExpiry).toLocaleTimeString() : 'Unknown'}</li>
+            <li>Time remaining: {tokenExpiry && isTokenValid() ? Math.max(0, Math.floor((tokenExpiry - Date.now()) / 1000)) + ' seconds' : 'Expired'}</li>
             <li>API endpoint: catalogue.dataspace.copernicus.eu/odata/v1</li>
           </ul>
         </div>
@@ -842,11 +806,10 @@ const ForestBiomassApp = () => {
       <div style={styles.authSection}>
         <h3>Copernicus Data Space Configuration</h3>
         <div style={styles.info}>
-          <strong>OAuth2 Authentication - CORS Configuration Required:</strong>
+          <strong>OAuth2 Client Credentials Flow:</strong>
           <ol style={{ margin: '10px 0', paddingLeft: '20px' }}>
             <li>Register at <a href="https://dataspace.copernicus.eu/" target="_blank" rel="noopener noreferrer">dataspace.copernicus.eu</a></li>
-            <li>Create OAuth2 client with SPA configuration enabled</li>
-            <li>Add your domain (https://biomass-app-8h7es.ondigitalocean.app) to allowed origins</li>
+            <li>Create OAuth2 client (no refresh tokens in client credentials flow)</li>
             <li>Alternative: Generate token via command line:
               <pre style={{ backgroundColor: '#f5f5f5', padding: '10px', marginTop: '5px', fontSize: '11px', overflow: 'auto' }}>
 {`curl -d "grant_type=client_credentials&client_id=YOUR_CLIENT_ID&\\
@@ -891,8 +854,10 @@ protocol/openid-connect/token`}
                 if (e.target.value) {
                   setAccessToken(e.target.value);
                   setAuthenticated(true);
-                  // Set token expiry to 9.5 minutes from now (570 seconds)
-                  setTokenExpiry(Date.now() + (570 * 1000));
+                  // Set token expiry to 9 minutes from now (540 seconds)
+                  const expiry = Date.now() + (540 * 1000);
+                  setTokenExpiry(expiry);
+                  setLastAuthTime(Date.now());
                 }
               }}
               disabled={authenticated}
@@ -923,9 +888,9 @@ protocol/openid-connect/token`}
         {authenticated && (
           <button
             style={{ ...styles.button, marginLeft: '10px' }}
-            onClick={refreshAccessToken}
+            onClick={reauthenticate}
           >
-            Refresh Token
+            Re-authenticate
           </button>
         )}
       </div>
@@ -1193,23 +1158,21 @@ protocol/openid-connect/token`}
       <div style={styles.info}>
         <h4>Technical Notes</h4>
         <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
-          <li>Authentication: OAuth2 Client Credentials Flow with refresh token support</li>
+          <li>Authentication: OAuth2 Client Credentials Flow (no refresh tokens)</li>
           <li>Token endpoint: https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token</li>
-          <li>Grant type: client_credentials (access token: 600s, refresh token: 3600s)</li>
-          <li>Token management: Automatic refresh before API calls, 401 retry with new token</li>
+          <li>Grant type: client_credentials (access token: 600s expiry)</li>
+          <li>Token management: Automatic re-authentication on expiry, no refresh token support</li>
+          <li>Re-authentication protection: Minimum 5s gap, mutex to prevent concurrent auth</li>
           <li>Rate limiting: Global rate limit tracking with exponential backoff (base: 3s, max: 30s)</li>
-          <li>API resilience: Token validation before each request, automatic re-authentication on 401</li>
+          <li>API resilience: Token validation before requests, 401 retry with re-authentication</li>
           <li>Data source: Copernicus Data Space Ecosystem OData API + Sentinel Hub Statistical API</li>
-          <li>NDVI Processing: Real-time calculation via Sentinel Hub Statistical API using evalscript</li>
-          <li>Cloud masking: Scene Classification Layer (SCL) band filters clouds, shadows, and snow</li>
-          <li>Spatial resolution: 10m for NDVI bands (B4/B8), statistical aggregation over polygon</li>
+          <li>NDVI Processing: Real-time calculation via Sentinel Hub Statistical API</li>
+          <li>Cloud masking: Scene Classification Layer (SCL) band filters</li>
+          <li>Spatial resolution: 10m for NDVI bands (B4/B8)</li>
           <li>Temporal resolution: ~5 days (combined S2A/S2B)</li>
           <li>Statistical API endpoint: https://sh.dataspace.copernicus.eu/api/v1/statistics</li>
-          <li>NDVI formula: (B08 - B04) / (B08 + B04) where B08=NIR (842nm), B04=Red (665nm)</li>
-          <li>Output format: Statistical summary with median NDVI values per scene</li>
-          <li>Error handling: 3 retries per request with exponential backoff, fallback to estimated values</li>
+          <li>Error handling: 3 retries per request with exponential backoff</li>
           <li>Biomass estimation: Empirical exponential model based on NDVI</li>
-          <li>Growth trend: Percentage change between annual means for selected date range</li>
         </ul>
       </div>
     </div>
