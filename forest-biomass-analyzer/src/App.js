@@ -616,8 +616,8 @@ const ForestBiomassApp = () => {
 
       <div style={styles.mapContainer}>
         <MapContainer
-          center={[62.0, 25.0]}
-          zoom={6}
+          center={[61.0, 24.0]}
+          zoom={10}
           style={{ height: '100%', width: '100%' }}
           ref={mapRef}
         >
