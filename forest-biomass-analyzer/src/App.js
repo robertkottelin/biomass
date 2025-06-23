@@ -108,6 +108,8 @@ const ForestBiomassApp = () => {
   const [accessToken, setAccessToken] = useState('');
   const [cloudCoverage, setCloudCoverage] = useState(20);
   const [processingStatus, setProcessingStatus] = useState('');
+  const [trendStartDate, setTrendStartDate] = useState('');
+  const [trendEndDate, setTrendEndDate] = useState('');
   const mapRef = useRef();
 
   // Load GeometryUtil on mount
@@ -700,6 +702,32 @@ const ForestBiomassApp = () => {
             Cloud-filtered scenes with less than {cloudCoverage}% cloud coverage.
             Processed via Copernicus Data Space Ecosystem API.
           </p>
+          
+          <div style={styles.controls}>
+            <div>
+              <label style={styles.label}>Growth Trend Start Date</label>
+              <input
+                style={styles.input}
+                type="date"
+                value={trendStartDate}
+                onChange={(e) => setTrendStartDate(e.target.value)}
+                min={biomassData[0]?.date}
+                max={biomassData[biomassData.length - 1]?.date}
+              />
+            </div>
+            <div>
+              <label style={styles.label}>Growth Trend End Date</label>
+              <input
+                style={styles.input}
+                type="date"
+                value={trendEndDate}
+                onChange={(e) => setTrendEndDate(e.target.value)}
+                min={biomassData[0]?.date}
+                max={biomassData[biomassData.length - 1]?.date}
+              />
+            </div>
+          </div>
+
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={biomassData}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -792,9 +820,41 @@ const ForestBiomassApp = () => {
               Average Biomass: {(biomassData.reduce((sum, d) => sum + d.biomass, 0) / biomassData.length).toFixed(1)} tons/ha
             </p>
             <p style={{ fontSize: '14px', margin: '5px 0' }}>
-              Growth Trend: {
-                ((biomassData[biomassData.length - 1]?.biomass - biomassData[0]?.biomass) / biomassData[0]?.biomass * 100).toFixed(1)
-              }% over analysis period
+              Growth Trend: {(() => {
+                // Calculate yearly means for growth trend
+                const startDate = trendStartDate || biomassData[0]?.date;
+                const endDate = trendEndDate || biomassData[biomassData.length - 1]?.date;
+                
+                // Filter data based on date range
+                const filteredData = biomassData.filter(d => 
+                  d.date >= startDate && d.date <= endDate
+                );
+                
+                if (filteredData.length === 0) return 'No data in selected range';
+                
+                // Group by year and calculate means
+                const yearlyMeans = {};
+                filteredData.forEach(d => {
+                  if (!yearlyMeans[d.year]) {
+                    yearlyMeans[d.year] = { sum: 0, count: 0 };
+                  }
+                  yearlyMeans[d.year].sum += d.biomass;
+                  yearlyMeans[d.year].count++;
+                });
+                
+                // Convert to array and sort by year
+                const years = Object.keys(yearlyMeans).sort();
+                if (years.length < 2) return 'Insufficient data for trend';
+                
+                // Calculate mean for first and last year
+                const firstYearMean = yearlyMeans[years[0]].sum / yearlyMeans[years[0]].count;
+                const lastYearMean = yearlyMeans[years[years.length - 1]].sum / yearlyMeans[years[years.length - 1]].count;
+                
+                // Calculate percentage change
+                const trendPercent = ((lastYearMean - firstYearMean) / firstYearMean * 100).toFixed(1);
+                
+                return `${trendPercent}% (${years[0]}-${years[years.length - 1]}, from ${firstYearMean.toFixed(1)} to ${lastYearMean.toFixed(1)} tons/ha)`;
+              })()}
             </p>
           </div>
         </div>
@@ -808,9 +868,12 @@ const ForestBiomassApp = () => {
           <li>Temporal resolution: ~5 days (combined S2A/S2B)</li>
           <li>Data fetching and processing pipeline: Copernicus OAuth2 Authentication via API with username/password, retrieves Sentinel-2 Level-2A products within user-defined polygon and date range, filters by cloud coverage, calculates NDVI from Bands 8 and 4, estimates biomass using forest type-specific exponential model, and sorts data chronologically.</li>
           <li>How to read the graph: Line chart with individual biomass (green dots) and NDVI (purple dots) observations over time, annual mean biomass (red line) for trend analysis, and interactive tooltip with date, NDVI, biomass, and cloud cover details.</li>
-          <li>NDVI calculation: (B8 - B4) / (B8 + B4) using Sentinel-2 bands</li>
+          <li>NIR (Near-Infrared): Spectral band where vegetation reflects light strongly due to its cellular structure.</li>
+          <li>R (Red): Spectral band where vegetation absorbs light due to chlorophyll for photosynthesis.</li>
+          <li>NDVI Calculation: Formula (NIR - R) / (NIR + R) quantifies vegetation health and density by measuring the difference in reflection and absorption. In code: (B8 - B4) / (B8 + B4) using Sentinel-2 bands.</li>
           <li>Biomass estimation model: Empirical exponential model based on NDVI</li>
           <li>Biomass estimation math: biomass = a × exp(b × NDVI) × (maxBiomass / 10), with a, b, maxBiomass specific to each forest type</li>
+          <li>Growth trend calculation: Computed from yearly mean biomass values within the specified date range. The algorithm filters observations by date, groups by year, calculates annual means, then computes percentage change between first and last year means: ((lastYearMean - firstYearMean) / firstYearMean × 100)</li>
         </ul>
       </div>
     </div>
