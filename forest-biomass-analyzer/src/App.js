@@ -104,15 +104,13 @@ const ForestBiomassApp = () => {
   const [error, setError] = useState(null);
   const [authenticated, setAuthenticated] = useState(false);
   const [accessToken, setAccessToken] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
   const [cloudCoverage, setCloudCoverage] = useState(20);
   const [processingStatus, setProcessingStatus] = useState('');
   const [trendStartDate, setTrendStartDate] = useState('');
   const [trendEndDate, setTrendEndDate] = useState('');
   const mapRef = useRef();
-  
-  // OAuth2 Client Credentials from environment variables
-  const CLIENT_ID = process.env.REACT_APP_CLIENT_ID || '';
-  const CLIENT_SECRET = process.env.REACT_APP_CLIENT_SECRET || '';
 
   // Load GeometryUtil on mount
   useEffect(() => {
@@ -135,8 +133,8 @@ const ForestBiomassApp = () => {
 
   // Authenticate with Copernicus Data Space Ecosystem
   const authenticateCDSE = async () => {
-    if (!CLIENT_ID || !CLIENT_SECRET) {
-      setError('Missing OAuth2 credentials. Please set REACT_APP_CLIENT_ID and REACT_APP_CLIENT_SECRET in .env file');
+    if (!clientId || !clientSecret) {
+      setError('Please enter both Client ID and Client Secret');
       return;
     }
 
@@ -147,8 +145,8 @@ const ForestBiomassApp = () => {
       // OAuth2 Client Credentials Flow
       const tokenData = new URLSearchParams({
         grant_type: 'client_credentials',
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET
+        client_id: clientId,
+        client_secret: clientSecret
       });
 
       const tokenResponse = await fetch('https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token', {
@@ -657,15 +655,32 @@ const ForestBiomassApp = () => {
           <ol style={{ margin: '10px 0', paddingLeft: '20px' }}>
             <li>Register at <a href="https://dataspace.copernicus.eu/" target="_blank" rel="noopener noreferrer">dataspace.copernicus.eu</a></li>
             <li>Create OAuth2 client credentials in User Settings</li>
-            <li>Set environment variables in .env file:
-              <pre style={{ backgroundColor: '#f5f5f5', padding: '10px', marginTop: '5px', fontSize: '12px' }}>
-                REACT_APP_CLIENT_ID=your_client_id{'\n'}
-                REACT_APP_CLIENT_SECRET=your_client_secret
-              </pre>
-            </li>
+            <li>Enter your credentials below</li>
           </ol>
         </div>
         <div style={styles.controls}>
+          <div>
+            <label style={styles.label}>Client ID</label>
+            <input
+              style={styles.input}
+              type="text"
+              placeholder="Enter your OAuth2 Client ID"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              disabled={authenticated}
+            />
+          </div>
+          <div>
+            <label style={styles.label}>Client Secret</label>
+            <input
+              style={styles.input}
+              type="password"
+              placeholder="Enter your OAuth2 Client Secret"
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              disabled={authenticated}
+            />
+          </div>
           <div>
             <label style={styles.label}>Max Cloud Coverage (%)</label>
             <input
@@ -676,19 +691,6 @@ const ForestBiomassApp = () => {
               value={cloudCoverage}
               onChange={(e) => setCloudCoverage(parseInt(e.target.value))}
             />
-          </div>
-          <div>
-            <label style={styles.label}>OAuth2 Status</label>
-            <div style={{ 
-              padding: '8px 12px', 
-              backgroundColor: authenticated ? '#d4edda' : '#f8d7da',
-              color: authenticated ? '#155724' : '#721c24',
-              borderRadius: '4px',
-              fontSize: '14px'
-            }}>
-              {authenticated ? 'Authenticated' : 'Not authenticated'}
-              {CLIENT_ID && CLIENT_SECRET ? '' : ' (Missing credentials)'}
-            </div>
           </div>
         </div>
         <button
@@ -966,9 +968,9 @@ const ForestBiomassApp = () => {
       <div style={styles.info}>
         <h4>Technical Notes</h4>
         <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
-          <li>Authentication: OAuth2 Client Credentials Flow via environment variables</li>
+          <li>Authentication: OAuth2 Client Credentials Flow via user-input credentials</li>
           <li>Token endpoint: https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token</li>
-          <li>Grant type: client_credentials with CLIENT_ID/CLIENT_SECRET from .env</li>
+          <li>Grant type: client_credentials with user-provided CLIENT_ID/CLIENT_SECRET</li>
           <li>Data source: Copernicus Data Space Ecosystem OData API (catalog) + Process API (NDVI calculation)</li>
           <li>NDVI Processing: Real-time calculation via Sentinel Hub Process API using evalscript</li>
           <li>Cloud masking: Scene Classification Layer (SCL) band filters clouds, shadows, and snow</li>
