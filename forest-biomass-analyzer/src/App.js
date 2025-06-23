@@ -121,6 +121,8 @@ const ForestBiomassApp = () => {
   
   // Global rate limit state
   const [rateLimitExpiry, setRateLimitExpiry] = useState(0);
+  const [apiFailureCount, setApiFailureCount] = useState(0);
+  const [simulatedDataCount, setSimulatedDataCount] = useState(0);
 
   // Load GeometryUtil on mount
   useEffect(() => {
@@ -428,7 +430,7 @@ const ForestBiomassApp = () => {
           console.error(`Statistical API error: ${response.status}`);
           const errorText = await response.text();
           console.error('Error details:', errorText);
-          return estimateNDVIFromDate(acquisitionDate);
+          return { ndvi: estimateNDVIFromDate(acquisitionDate), isSimulated: true };
         }
         
         const statsData = await response.json();
@@ -437,11 +439,14 @@ const ForestBiomassApp = () => {
           const dayStats = statsData.data[0];
           if (dayStats.outputs && dayStats.outputs.ndvi) {
             const ndviStats = dayStats.outputs.ndvi.bands.B0;
-            return ndviStats.stats.mean || ndviStats.stats.percentiles['50.0'] || estimateNDVIFromDate(acquisitionDate);
+            const ndviValue = ndviStats.stats.mean || ndviStats.stats.percentiles['50.0'];
+            if (ndviValue !== undefined && ndviValue !== null) {
+              return { ndvi: ndviValue, isSimulated: false };
+            }
           }
         }
         
-        return estimateNDVIFromDate(acquisitionDate);
+        return { ndvi: estimateNDVIFromDate(acquisitionDate), isSimulated: true };
         
       } catch (error) {
         if (error.status === 429) {
@@ -449,7 +454,7 @@ const ForestBiomassApp = () => {
         }
         if (retries >= maxRetries - 1) {
           console.error('NDVI processing error after retries:', error);
-          return estimateNDVIFromDate(acquisitionDate);
+          return { ndvi: estimateNDVIFromDate(acquisitionDate), isSimulated: true };
         }
         retries++;
         await new Promise(resolve => setTimeout(resolve, 2000 * retries)); // Exponential backoff
@@ -534,6 +539,8 @@ const ForestBiomassApp = () => {
       const biomassResults = [];
       const batchSize = 5;
       const baseDelay = 3000;
+      let simulatedCount = 0;
+      let apiFailures = 0;
 
       for (let i = 0; i < allProducts.length; i += batchSize) {
         const batch = allProducts.slice(i, i + batchSize);
@@ -550,9 +557,9 @@ const ForestBiomassApp = () => {
           const date = new Date(product.ContentDate.Start).toISOString().split('T')[0];
 
           let retries = 0;
-          let ndviValue = null;
+          let ndviResult = null;
           
-          while (retries < 3 && ndviValue === null) {
+          while (retries < 3 && ndviResult === null) {
             try {
               if (retries === 0) {
                 await new Promise(resolve => setTimeout(resolve, baseDelay));
@@ -561,7 +568,7 @@ const ForestBiomassApp = () => {
                 await new Promise(resolve => setTimeout(resolve, backoffDelay));
               }
 
-              ndviValue = await processSentinel2NDVI(product, selectedForest);
+              ndviResult = await processSentinel2NDVI(product, selectedForest);
               
             } catch (error) {
               if (error.status === 429 && error.retryAfter) {
@@ -572,12 +579,17 @@ const ForestBiomassApp = () => {
               
               if (retries >= 3) {
                 console.error(`Failed to process product after ${retries} retries`);
-                ndviValue = estimateNDVIFromDate(new Date(product.ContentDate.Start));
+                ndviResult = { ndvi: estimateNDVIFromDate(new Date(product.ContentDate.Start)), isSimulated: true };
+                apiFailures++;
               }
             }
           }
           
-          const biomass = ndviToBiomass(ndviValue, selectedForest.type);
+          if (ndviResult.isSimulated) {
+            simulatedCount++;
+          }
+          
+          const biomass = ndviToBiomass(ndviResult.ndvi, selectedForest.type);
 
           const cloudCoverAttr = product.Attributes?.find(attr =>
             attr.Name === 'cloudCover' && attr.ValueType === 'Double'
@@ -588,12 +600,13 @@ const ForestBiomassApp = () => {
             date: date,
             year: parseInt(date.split('-')[0]),
             month: parseInt(date.split('-')[1]),
-            ndvi: ndviValue,
+            ndvi: ndviResult.ndvi,
             biomass: biomass,
             productId: product.Id,
             productName: product.Name,
             cloudCover: cloudCoverValue,
-            footprint: product.GeoFootprint
+            footprint: product.GeoFootprint,
+            isSimulated: ndviResult.isSimulated
           });
         }
 
@@ -620,6 +633,8 @@ const ForestBiomassApp = () => {
       });
 
       setBiomassData(biomassResults);
+      setSimulatedDataCount(simulatedCount);
+      setApiFailureCount(apiFailures);
       setProcessingStatus('');
     } catch (err) {
       setError('Data fetch error: ' + err.message);
@@ -1000,6 +1015,24 @@ protocol/openid-connect/token`}
       {biomassData.length > 0 && (
         <div style={styles.chartContainer}>
           <h2>Historical Biomass Analysis</h2>
+          
+          {simulatedDataCount > 0 && (
+            <div style={{
+              backgroundColor: '#fff3cd',
+              color: '#856404',
+              padding: '12px 20px',
+              borderRadius: '4px',
+              marginBottom: '20px',
+              border: '1px solid #ffeaa7',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px'
+            }}>
+              <strong>⚠️ API Failure Warning:</strong>
+              <span>{simulatedDataCount} of {biomassData.length} data points ({((simulatedDataCount / biomassData.length) * 100).toFixed(1)}%) are using fallback NDVI estimation due to API failures. These simulated values are marked with hollow dots in the chart.</span>
+            </div>
+          )}
+          
           <p style={{ fontSize: '14px', color: '#666', marginBottom: '20px' }}>
             NDVI time series from Sentinel-2 MSI (10m resolution for B4/B8).
             Cloud-filtered scenes with less than {cloudCoverage}% cloud coverage.
@@ -1057,6 +1090,11 @@ protocol/openid-connect/token`}
                         boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
                       }}>
                         <p style={{ margin: '0 0 5px 0', fontWeight: 'bold' }}>{label}</p>
+                        {data.isSimulated && (
+                          <p style={{ margin: '2px 0', fontSize: '12px', color: '#ff6b6b', fontWeight: 'bold' }}>
+                            ⚠️ SIMULATED DATA (API Failure)
+                          </p>
+                        )}
                         <p style={{ margin: '2px 0', fontSize: '12px' }}>
                           NDVI: {data.ndvi.toFixed(3)}
                         </p>
@@ -1070,6 +1108,9 @@ protocol/openid-connect/token`}
                         )}
                         <p style={{ margin: '2px 0', fontSize: '12px', color: '#666' }}>
                           Cloud Cover: {data.cloudCover.toFixed(1)}%
+                        </p>
+                        <p style={{ margin: '2px 0', fontSize: '10px', color: '#999' }}>
+                          Source: {data.isSimulated ? 'Seasonal Model' : 'Sentinel-2 API'}
                         </p>
                       </div>
                     );
@@ -1085,7 +1126,19 @@ protocol/openid-connect/token`}
                 stroke="#82ca9d"
                 name="Scene Biomass"
                 strokeWidth={0}
-                dot={{ r: 2, fill: '#82ca9d' }}
+                dot={(props) => {
+                  const { cx, cy, payload } = props;
+                  return (
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={3}
+                      fill={payload.isSimulated ? 'none' : '#82ca9d'}
+                      stroke="#82ca9d"
+                      strokeWidth={payload.isSimulated ? 2 : 0}
+                    />
+                  );
+                }}
               />
               <Line
                 yAxisId="ndvi"
@@ -1094,7 +1147,19 @@ protocol/openid-connect/token`}
                 stroke="#8884d8"
                 name="Scene NDVI"
                 strokeWidth={0}
-                dot={{ r: 2, fill: '#8884d8' }}
+                dot={(props) => {
+                  const { cx, cy, payload } = props;
+                  return (
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r={3}
+                      fill={payload.isSimulated ? 'none' : '#8884d8'}
+                      stroke="#8884d8"
+                      strokeWidth={payload.isSimulated ? 2 : 0}
+                    />
+                  );
+                }}
               />
               <Line
                 yAxisId="biomass"
@@ -1112,6 +1177,12 @@ protocol/openid-connect/token`}
             <h4>Analysis Summary</h4>
             <p style={{ fontSize: '14px', margin: '5px 0' }}>
               Total Observations: {biomassData.length} cloud-free scenes
+            </p>
+            <p style={{ fontSize: '14px', margin: '5px 0' }}>
+              Real Data (Sentinel-2 API): {biomassData.length - simulatedDataCount} scenes ({((biomassData.length - simulatedDataCount) / biomassData.length * 100).toFixed(1)}%)
+            </p>
+            <p style={{ fontSize: '14px', margin: '5px 0' }}>
+              Simulated Data (Fallback): {simulatedDataCount} scenes ({(simulatedDataCount / biomassData.length * 100).toFixed(1)}%)
             </p>
             <p style={{ fontSize: '14px', margin: '5px 0' }}>
               Analysis Period: {biomassData[0]?.year} - {biomassData[biomassData.length - 1]?.year}
@@ -1166,6 +1237,7 @@ protocol/openid-connect/token`}
       <div style={styles.info}>
         <h4>Technical Notes</h4>
         <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
+          <li>Sentinel Satellite active from 2015-08</li>
           <li>Authentication: OAuth2 Client Credentials Flow (no refresh tokens)</li>
           <li>Token endpoint: https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token</li>
           <li>Grant type: client_credentials (access token: 600s expiry)</li>
@@ -1189,3 +1261,4 @@ protocol/openid-connect/token`}
 };
 
 export default ForestBiomassApp;
+
