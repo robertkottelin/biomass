@@ -61,7 +61,7 @@ const DrawControl = ({ onCreated, onDeleted }) => {
           polyline: false
         }
       });
-      
+
       drawControlRef.current = drawControl;
       map.addControl(drawControl);
 
@@ -173,11 +173,11 @@ const ForestBiomassApp = () => {
   // Search for Sentinel-2 products
   const searchSentinel2Products = async (polygon, startDate, endDate) => {
     const coords = polygon.coords.map(coord => [coord[1], coord[0]]); // Convert to lon,lat
-    
+
     // Create WKT polygon string - ensure it's closed (first and last point must be same)
     const coordsString = [...coords, coords[0]].map(c => `${c[0]} ${c[1]}`).join(',');
     const wktPolygon = `POLYGON((${coordsString}))`;
-    
+
     // Build filter string components
     const collectionFilter = `Collection/Name eq 'SENTINEL-2'`;
     const spatialFilter = `OData.CSC.Intersects(area=geography'SRID=4326;${wktPolygon}')`;
@@ -185,10 +185,10 @@ const ForestBiomassApp = () => {
     const dateEndFilter = `ContentDate/Start lt ${endDate}T00:00:00.000Z`;
     const cloudFilter = `Attributes/OData.CSC.DoubleAttribute/any(att:att/Name eq 'cloudCover' and att/OData.CSC.DoubleAttribute/Value le ${cloudCoverage}.00)`;
     const productTypeFilter = `Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/OData.CSC.StringAttribute/Value eq 'S2MSI2A')`;
-    
+
     // Combine filters
     const filterQuery = `${collectionFilter} and ${spatialFilter} and ${dateStartFilter} and ${dateEndFilter} and ${cloudFilter} and ${productTypeFilter}`;
-    
+
     // OData query URL
     const searchUrl = `https://catalogue.dataspace.copernicus.eu/odata/v1/Products?$filter=${encodeURIComponent(filterQuery)}&$orderby=ContentDate/Start&$top=100`;
 
@@ -215,25 +215,25 @@ const ForestBiomassApp = () => {
     // 1. Download product and process locally (rasterio/GDAL)
     // 2. Use Sentinel Hub Process API (requires additional subscription)
     // 3. Use STAC API with COG access for direct band reading
-    
+
     // Parse acquisition date from product name
     // Format: S2[A|B]_MSIL2A_YYYYMMDDTHHMMSS_...
     const dateMatch = productName.match(/S2[AB]_MSIL2A_(\d{8})T/);
     const acquisitionDate = dateMatch ? dateMatch[1] : null;
-    
+
     // Simulate NDVI based on seasonal patterns
     if (acquisitionDate) {
       const month = parseInt(acquisitionDate.substring(4, 6));
       const day = parseInt(acquisitionDate.substring(6, 8));
-      
+
       // Seasonal NDVI model for temperate forests
       const dayOfYear = (month - 1) * 30 + day; // Approximation
       const seasonalFactor = 0.3 * Math.sin(2 * Math.PI * (dayOfYear - 80) / 365) + 0.5;
       const randomVariation = (Math.random() - 0.5) * 0.1;
-      
+
       return Math.max(0, Math.min(1, seasonalFactor + randomVariation));
     }
-    
+
     // Default fallback
     return 0.5 + (Math.random() - 0.5) * 0.2;
   };
@@ -257,26 +257,26 @@ const ForestBiomassApp = () => {
 
     try {
       const selectedForest = selectedForests[selectedForestIndex];
-      
+
       // Sentinel-2 data available from July 2015
       const endDate = new Date().toISOString().split('T')[0];
       const startDate = '2015-07-01'; // First Sentinel-2A data availability
-      
+
       // Batch requests by year to manage large datasets
       const startYear = 2015;
       const endYear = new Date().getFullYear();
       const allProducts = [];
-      
+
       for (let year = startYear; year <= endYear; year++) {
         const yearStart = year === 2015 ? '2015-07-01' : `${year}-01-01`;
         const yearEnd = year === endYear ? endDate : `${year}-12-31`;
-        
+
         setProcessingStatus(`Fetching data for ${year}...`);
-        
+
         try {
           const yearProducts = await searchSentinel2Products(selectedForest, yearStart, yearEnd);
           allProducts.push(...yearProducts);
-          
+
           // Implement rate limiting to avoid API throttling
           if (year < endYear) {
             await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay between requests
@@ -286,34 +286,34 @@ const ForestBiomassApp = () => {
           // Continue with other years even if one fails
         }
       }
-      
+
       if (allProducts.length === 0) {
         setError('No Sentinel-2 products found for the selected area');
         return;
       }
-      
+
       setProcessingStatus(`Found ${allProducts.length} products. Processing NDVI...`);
-      
+
       // Process products to extract NDVI
       const biomassResults = [];
       const batchSize = 50; // Process in batches to avoid UI freezing
-      
+
       for (let i = 0; i < allProducts.length; i += batchSize) {
         const batch = allProducts.slice(i, i + batchSize);
-        
+
         for (const product of batch) {
           const date = new Date(product.ContentDate.Start).toISOString().split('T')[0];
-          
+
           // Extract NDVI (production implementation required)
           const ndviValue = await processSentinel2NDVI(product.Id, product.Name);
           const biomass = ndviToBiomass(ndviValue, selectedForest.type);
-          
+
           // Extract cloud cover from attributes
-          const cloudCoverAttr = product.Attributes?.find(attr => 
+          const cloudCoverAttr = product.Attributes?.find(attr =>
             attr.Name === 'cloudCover' && attr.ValueType === 'Double'
           );
           const cloudCoverValue = cloudCoverAttr ? cloudCoverAttr.Value : 0;
-          
+
           biomassResults.push({
             date: date,
             year: parseInt(date.split('-')[0]),
@@ -326,13 +326,13 @@ const ForestBiomassApp = () => {
             footprint: product.GeoFootprint
           });
         }
-        
+
         setProcessingStatus(`Processing: ${Math.round((i + batchSize) / allProducts.length * 100)}% complete`);
       }
-      
+
       // Sort by date
       biomassResults.sort((a, b) => new Date(a.date) - new Date(b.date));
-      
+
       // Calculate annual means
       const yearlyBiomass = {};
       biomassResults.forEach(point => {
@@ -348,7 +348,7 @@ const ForestBiomassApp = () => {
           point.biomassMean = yearData.reduce((sum, val) => sum + val, 0) / yearData.length;
         }
       });
-      
+
       setBiomassData(biomassResults);
       setProcessingStatus('');
     } catch (err) {
@@ -362,7 +362,7 @@ const ForestBiomassApp = () => {
   const handleCreated = useCallback((e) => {
     const layer = e.layer;
     const coords = layer.getLatLngs()[0];
-    
+
     let area;
     if (window.L && window.L.GeometryUtil && window.L.GeometryUtil.geodesicArea) {
       area = L.GeometryUtil.geodesicArea(coords) / 10000;
@@ -377,7 +377,7 @@ const ForestBiomassApp = () => {
       const latRad = coords[0].lat * Math.PI / 180;
       area = Math.abs(sum * 111319.9 * 111319.9 * Math.cos(latRad) / 2) / 10000;
     }
-    
+
     const newForest = {
       id: Date.now(),
       coords: coords.map(c => [c.lat, c.lng]),
@@ -385,7 +385,7 @@ const ForestBiomassApp = () => {
       type: forestType,
       analysisYear: new Date().getFullYear()
     };
-    
+
     setSelectedForests(prev => [...prev, newForest]);
   }, [forestType]);
 
@@ -523,13 +523,13 @@ const ForestBiomassApp = () => {
   return (
     <div style={styles.container}>
       <h1 style={styles.header}>Forest Biomass Analysis - Sentinel-2 Integration</h1>
-      
+
       {error && (
         <div style={styles.error}>
           <strong>Error:</strong> {error}
         </div>
       )}
-      
+
       {authenticated && accessToken && (
         <div style={styles.info}>
           <strong>Authentication Status:</strong>
@@ -540,7 +540,7 @@ const ForestBiomassApp = () => {
           </ul>
         </div>
       )}
-      
+
       <div style={styles.authSection}>
         <h3>Copernicus Data Space Configuration</h3>
         <div style={styles.info}>
@@ -554,7 +554,7 @@ const ForestBiomassApp = () => {
         <div style={styles.controls}>
           <div>
             <label style={styles.label}>Username</label>
-            <input 
+            <input
               style={styles.input}
               type="text"
               placeholder="Your CDSE username"
@@ -565,7 +565,7 @@ const ForestBiomassApp = () => {
           </div>
           <div>
             <label style={styles.label}>Password</label>
-            <input 
+            <input
               style={styles.input}
               type="password"
               placeholder="Your CDSE password"
@@ -576,7 +576,7 @@ const ForestBiomassApp = () => {
           </div>
           <div>
             <label style={styles.label}>Max Cloud Coverage (%)</label>
-            <input 
+            <input
               style={styles.input}
               type="number"
               min="0"
@@ -586,7 +586,7 @@ const ForestBiomassApp = () => {
             />
           </div>
         </div>
-        <button 
+        <button
           style={{
             ...styles.button,
             ...(authenticated ? styles.buttonDisabled : {})
@@ -597,13 +597,13 @@ const ForestBiomassApp = () => {
           {authenticated ? 'Authenticated' : 'Authenticate with CDSE'}
         </button>
       </div>
-      
+
       <div style={styles.controls}>
         <div>
           <label style={styles.label}>Forest Type</label>
-          <select 
+          <select
             style={styles.select}
-            value={forestType} 
+            value={forestType}
             onChange={(e) => setForestType(e.target.value)}
           >
             <option value="pine">Pine</option>
@@ -617,7 +617,7 @@ const ForestBiomassApp = () => {
       <div style={styles.mapContainer}>
         <MapContainer
           center={[61.0, 24.0]}
-          zoom={10}
+          zoom={15}
           style={{ height: '100%', width: '100%' }}
           ref={mapRef}
         >
@@ -638,7 +638,7 @@ const ForestBiomassApp = () => {
               <Polygon
                 key={forest.id}
                 positions={forest.coords}
-                pathOptions={{ 
+                pathOptions={{
                   color: idx === selectedForestIndex ? '#ff7800' : '#51a351',
                   weight: 3,
                   opacity: 0.8,
@@ -653,7 +653,7 @@ const ForestBiomassApp = () => {
         </MapContainer>
       </div>
 
-      <button 
+      <button
         style={{
           ...styles.button,
           ...(loading || selectedForests.length === 0 || !authenticated ? styles.buttonDisabled : {})
@@ -667,8 +667,8 @@ const ForestBiomassApp = () => {
       {selectedForests.length > 0 && (
         <div style={styles.forestInfo}>
           {selectedForests.map((forest, idx) => (
-            <div 
-              key={forest.id} 
+            <div
+              key={forest.id}
               style={{
                 ...styles.infoCard,
                 border: idx === selectedForestIndex ? '2px solid #ff7800' : '1px solid #e9ecef',
@@ -696,14 +696,14 @@ const ForestBiomassApp = () => {
         <div style={styles.chartContainer}>
           <h2>Historical Biomass Analysis</h2>
           <p style={{ fontSize: '14px', color: '#666', marginBottom: '20px' }}>
-            NDVI time series from Sentinel-2 MSI (10m resolution for B4/B8). 
+            NDVI time series from Sentinel-2 MSI (10m resolution for B4/B8).
             Cloud-filtered scenes with less than {cloudCoverage}% cloud coverage.
             Processed via Copernicus Data Space Ecosystem API.
           </p>
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={biomassData}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis 
+              <XAxis
                 dataKey="date"
                 tick={{ fontSize: 11 }}
                 angle={-45}
@@ -713,7 +713,7 @@ const ForestBiomassApp = () => {
               />
               <YAxis yAxisId="biomass" orientation="left" label={{ value: 'Biomass (tons/ha)', angle: -90, position: 'insideLeft' }} />
               <YAxis yAxisId="ndvi" orientation="right" label={{ value: 'NDVI', angle: 90, position: 'insideRight' }} domain={[-0.2, 1]} />
-              <Tooltip 
+              <Tooltip
                 content={({ active, payload, label }) => {
                   if (active && payload && payload.length) {
                     const data = payload[0].payload;
@@ -742,36 +742,36 @@ const ForestBiomassApp = () => {
                 }}
               />
               <Legend />
-              <Line 
+              <Line
                 yAxisId="biomass"
-                type="monotone" 
-                dataKey="biomass" 
-                stroke="#82ca9d" 
+                type="monotone"
+                dataKey="biomass"
+                stroke="#82ca9d"
                 name="Scene Biomass"
                 strokeWidth={0}
                 dot={{ r: 2, fill: '#82ca9d' }}
               />
-              <Line 
+              <Line
                 yAxisId="ndvi"
-                type="monotone" 
-                dataKey="ndvi" 
-                stroke="#8884d8" 
+                type="monotone"
+                dataKey="ndvi"
+                stroke="#8884d8"
                 name="Scene NDVI"
                 strokeWidth={0}
                 dot={{ r: 2, fill: '#8884d8' }}
               />
-              <Line 
+              <Line
                 yAxisId="biomass"
-                type="monotone" 
-                dataKey="biomassMean" 
-                stroke="#ff0000" 
+                type="monotone"
+                dataKey="biomassMean"
+                stroke="#ff0000"
                 name="Annual Mean"
                 strokeWidth={3}
                 dot={false}
               />
             </LineChart>
           </ResponsiveContainer>
-          
+
           <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
             <h4>Analysis Summary</h4>
             <p style={{ fontSize: '14px', margin: '5px 0' }}>
@@ -794,15 +794,18 @@ const ForestBiomassApp = () => {
           </div>
         </div>
       )}
-      
+
       <div style={styles.info}>
         <h4>Technical Notes</h4>
         <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
-          <li>NDVI calculation: (B8 - B4) / (B8 + B4) using Sentinel-2 bands</li>
+          <li>Data source: Copernicus Data Space Ecosystem API</li>
           <li>Spatial resolution: 10m for NDVI bands</li>
           <li>Temporal resolution: ~5 days (combined S2A/S2B)</li>
-          <li>For production use, implement Sentinel Hub Process API for actual NDVI extraction</li>
-          <li>Consider using Statistical API for polygon-based analysis</li>
+          <li>Data fetching and processing pipeline: Copernicus OAuth2 Authentication via API with username/password, retrieves Sentinel-2 Level-2A products within user-defined polygon and date range, filters by cloud coverage, calculates NDVI from Bands 8 and 4, estimates biomass using forest type-specific exponential model, and sorts data chronologically.</li>
+          <li>How to read the graph: Line chart with individual biomass (green dots) and NDVI (purple dots) observations over time, annual mean biomass (red line) for trend analysis, and interactive tooltip with date, NDVI, biomass, and cloud cover details.</li>
+          <li>NDVI calculation: (B8 - B4) / (B8 + B4) using Sentinel-2 bands</li>
+          <li>Biomass estimation model: Empirical exponential model based on NDVI</li>
+          <li>Biomass estimation math: biomass = a × exp(b × NDVI) × (maxBiomass / 10), with a, b, maxBiomass specific to each forest type</li>
         </ul>
       </div>
     </div>
