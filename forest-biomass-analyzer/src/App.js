@@ -216,7 +216,7 @@ const ForestBiomassApp = () => {
   };
 
   // Process Sentinel-2 NDVI data using Sentinel Hub Statistical API
-  const processSentinel2NDVI = async (product, polygon) => {
+  const processSentinel2NDVI = async (product, polygon, retryAfterMs = 0) => {
     // Extract date from product
     const acquisitionDate = new Date(product.ContentDate.Start);
     const dateStr = acquisitionDate.toISOString().split('T')[0];
@@ -316,6 +316,17 @@ const ForestBiomassApp = () => {
         body: JSON.stringify(statsRequest)
       });
       
+      if (response.status === 429) {
+        // Extract retry-after header
+        const retryAfterHeader = response.headers.get('retry-after');
+        const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader) : 5000;
+        
+        const error = new Error('Rate limit exceeded');
+        error.status = 429;
+        error.retryAfter = retryAfterMs;
+        throw error;
+      }
+      
       if (!response.ok) {
         console.error(`Statistical API error: ${response.status}`);
         const errorText = await response.text();
@@ -340,6 +351,9 @@ const ForestBiomassApp = () => {
       return estimateNDVIFromDate(acquisitionDate);
       
     } catch (error) {
+      if (error.status === 429) {
+        throw error; // Re-throw rate limit errors for handling upstream
+      }
       console.error('NDVI processing error:', error);
       return estimateNDVIFromDate(acquisitionDate);
     }
@@ -412,9 +426,11 @@ const ForestBiomassApp = () => {
 
       setProcessingStatus(`Found ${allProducts.length} products. Processing NDVI...`);
 
-      // Process products to extract NDVI
+      // Process products to extract NDVI with rate limiting
       const biomassResults = [];
-      const batchSize = 50; // Process in batches to avoid UI freezing
+      const batchSize = 10; // Reduced from 50 to avoid rate limits
+      const requestDelay = 2000; // 2 second delay between requests
+      let retryAfter = 0;
 
       for (let i = 0; i < allProducts.length; i += batchSize) {
         const batch = allProducts.slice(i, i + batchSize);
@@ -422,8 +438,41 @@ const ForestBiomassApp = () => {
         for (const product of batch) {
           const date = new Date(product.ContentDate.Start).toISOString().split('T')[0];
 
-          // Extract NDVI using Process API
-          const ndviValue = await processSentinel2NDVI(product, selectedForest);
+          // Implement exponential backoff for rate limiting
+          let retries = 0;
+          let ndviValue = null;
+          
+          while (retries < 3 && ndviValue === null) {
+            try {
+              // Add delay based on retry-after header or exponential backoff
+              if (retryAfter > 0) {
+                await new Promise(resolve => setTimeout(resolve, retryAfter));
+                retryAfter = 0;
+              } else if (retries > 0) {
+                const backoffDelay = Math.min(1000 * Math.pow(2, retries), 30000);
+                await new Promise(resolve => setTimeout(resolve, backoffDelay));
+              }
+
+              // Extract NDVI using Statistical API
+              ndviValue = await processSentinel2NDVI(product, selectedForest, retryAfter);
+              
+              // Add standard delay between successful requests
+              await new Promise(resolve => setTimeout(resolve, requestDelay));
+              
+            } catch (error) {
+              if (error.status === 429 && error.retryAfter) {
+                retryAfter = parseInt(error.retryAfter) || 5000;
+                console.log(`Rate limited. Waiting ${retryAfter}ms before retry...`);
+              }
+              retries++;
+              
+              if (retries >= 3) {
+                console.error(`Failed to process product after ${retries} retries`);
+                ndviValue = estimateNDVIFromDate(new Date(product.ContentDate.Start));
+              }
+            }
+          }
+          
           const biomass = ndviToBiomass(ndviValue, selectedForest.type);
 
           // Extract cloud cover from attributes
