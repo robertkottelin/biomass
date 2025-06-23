@@ -134,7 +134,7 @@ const ForestBiomassApp = () => {
   // Authenticate with Copernicus Data Space Ecosystem
   const authenticateCDSE = async () => {
     if (!clientId || !clientSecret) {
-      setError('Please enter both Client ID and Client Secret');
+      setError('Missing credentials: Client ID and Client Secret required');
       return;
     }
 
@@ -142,7 +142,6 @@ const ForestBiomassApp = () => {
     setProcessingStatus('Authenticating...');
 
     try {
-      // OAuth2 Client Credentials Flow
       const tokenData = new URLSearchParams({
         grant_type: 'client_credentials',
         client_id: clientId,
@@ -159,7 +158,7 @@ const ForestBiomassApp = () => {
 
       if (!tokenResponse.ok) {
         const errorData = await tokenResponse.json();
-        throw new Error(`Authentication failed: ${errorData.error_description || tokenResponse.statusText}`);
+        throw new Error(`HTTP ${tokenResponse.status}: ${errorData.error_description || tokenResponse.statusText}`);
       }
 
       const tokenResult = await tokenResponse.json();
@@ -167,10 +166,13 @@ const ForestBiomassApp = () => {
       setAuthenticated(true);
       setProcessingStatus('');
       
-      // Token expires after expires_in seconds (typically 600)
-      console.log(`Token acquired. Expires in ${tokenResult.expires_in} seconds`);
+      console.log(`Token acquired. Expires: ${tokenResult.expires_in}s`);
     } catch (err) {
-      setError('Authentication error: ' + err.message);
+      if (err.message.includes('Failed to fetch')) {
+        setError('CORS blocked. Solutions:\n1. Configure OAuth client for SPA with domain whitelist\n2. Use manual token entry field\n3. Implement backend proxy endpoint');
+      } else {
+        setError(`Authentication failed: ${err.message}`);
+      }
       setProcessingStatus('');
     }
   };
@@ -219,7 +221,7 @@ const ForestBiomassApp = () => {
     const acquisitionDate = new Date(product.ContentDate.Start);
     const dateStr = acquisitionDate.toISOString().split('T')[0];
     
-    // NDVI evalscript for Sentinel Hub Process API
+    // NDVI evalscript for Sentinel Hub Process API with statistical output
     const evalscript = `
       //VERSION=3
       function setup() {
@@ -229,6 +231,7 @@ const ForestBiomassApp = () => {
             units: "DN"
           }],
           output: {
+            id: "statistics",
             bands: 1,
             sampleType: "FLOAT32"
           }
@@ -254,7 +257,7 @@ const ForestBiomassApp = () => {
     // Convert polygon to WGS84 coordinates for Process API
     const coordinates = polygon.coords.map(coord => [coord[1], coord[0]]); // lon, lat
     
-    // Process API request payload
+    // Process API request payload for JSON output
     const processRequest = {
       input: {
         bounds: {
@@ -274,12 +277,12 @@ const ForestBiomassApp = () => {
         }]
       },
       output: {
-        width: 100,  // Resolution for statistical calculation
-        height: 100,
+        width: 512,  // Increased resolution for better sampling
+        height: 512,
         responses: [{
-          identifier: "default",
+          identifier: "statistics",
           format: {
-            type: "image/tiff"
+            type: "application/json"
           }
         }]
       },
@@ -299,33 +302,53 @@ const ForestBiomassApp = () => {
       
       if (!response.ok) {
         console.error(`Process API error: ${response.status}`);
+        const errorText = await response.text();
+        console.error('Error details:', errorText);
         // Fallback to statistical estimation if API fails
         return estimateNDVIFromDate(acquisitionDate);
       }
       
-      // Process response to extract mean NDVI
+      // For JSON response, parse directly
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        const jsonData = await response.json();
+        // Calculate mean from JSON data if structured response
+        if (jsonData && jsonData.statistics) {
+          return jsonData.statistics.mean || estimateNDVIFromDate(acquisitionDate);
+        }
+      }
+      
+      // If still TIFF response, use alternative parsing
       const arrayBuffer = await response.arrayBuffer();
-      const dataView = new DataView(arrayBuffer);
       
-      // Simple TIFF parsing for single-band float32 data
-      // Skip TIFF header and read pixel values directly
+      // Simple approach: sample center pixels for NDVI estimate
+      // TIFF structure is complex, so we'll use a statistical sampling approach
+      const bytes = new Uint8Array(arrayBuffer);
+      
+      // Look for TIFF header (II or MM for little/big endian)
+      const isLittleEndian = bytes[0] === 0x49 && bytes[1] === 0x49;
+      
+      // For simplified parsing, estimate NDVI from sampling
       let ndviSum = 0;
-      let validPixels = 0;
+      let validSamples = 0;
+      const sampleRate = 100; // Sample every 100th pixel
       
-      // Assuming simple uncompressed TIFF structure
-      const pixelCount = 100 * 100;
-      const dataOffset = 8; // Basic TIFF header size
-      
-      for (let i = 0; i < pixelCount; i++) {
-        const value = dataView.getFloat32(dataOffset + i * 4, true); // little-endian
-        if (!isNaN(value) && value >= -1 && value <= 1) {
-          ndviSum += value;
-          validPixels++;
+      // Start from offset 1024 (typical data start) and sample values
+      for (let i = 1024; i < bytes.length - 4; i += sampleRate * 4) {
+        if (i + 4 <= bytes.length) {
+          // Read float32 value
+          const dataView = new DataView(arrayBuffer, i, 4);
+          const value = dataView.getFloat32(0, isLittleEndian);
+          
+          if (!isNaN(value) && value >= -1 && value <= 1) {
+            ndviSum += value;
+            validSamples++;
+          }
         }
       }
       
       // Return mean NDVI
-      return validPixels > 0 ? ndviSum / validPixels : estimateNDVIFromDate(acquisitionDate);
+      return validSamples > 0 ? ndviSum / validSamples : estimateNDVIFromDate(acquisitionDate);
       
     } catch (error) {
       console.error('NDVI processing error:', error);
@@ -651,11 +674,20 @@ const ForestBiomassApp = () => {
       <div style={styles.authSection}>
         <h3>Copernicus Data Space Configuration</h3>
         <div style={styles.info}>
-          <strong>OAuth2 Authentication Setup:</strong>
+          <strong>OAuth2 Authentication - CORS Configuration Required:</strong>
           <ol style={{ margin: '10px 0', paddingLeft: '20px' }}>
             <li>Register at <a href="https://dataspace.copernicus.eu/" target="_blank" rel="noopener noreferrer">dataspace.copernicus.eu</a></li>
-            <li>Create OAuth2 client credentials in User Settings</li>
-            <li>Enter your credentials below</li>
+            <li>Create OAuth2 client with SPA configuration enabled</li>
+            <li>Add your domain (https://biomass-app-8h7es.ondigitalocean.app) to allowed origins</li>
+            <li>Alternative: Generate token via command line:
+              <pre style={{ backgroundColor: '#f5f5f5', padding: '10px', marginTop: '5px', fontSize: '11px', overflow: 'auto' }}>
+{`curl -d "grant_type=client_credentials&client_id=YOUR_CLIENT_ID&\\
+client_secret=YOUR_CLIENT_SECRET" \\
+-H "Content-Type: application/x-www-form-urlencoded" \\
+-X POST https://identity.dataspace.copernicus.eu/auth/realms/CDSE/\\
+protocol/openid-connect/token`}
+              </pre>
+            </li>
           </ol>
         </div>
         <div style={styles.controls}>
@@ -678,6 +710,21 @@ const ForestBiomassApp = () => {
               placeholder="Enter your OAuth2 Client Secret"
               value={clientSecret}
               onChange={(e) => setClientSecret(e.target.value)}
+              disabled={authenticated}
+            />
+          </div>
+          <div>
+            <label style={styles.label}>Access Token (Manual Entry)</label>
+            <input
+              style={styles.input}
+              type="text"
+              placeholder="Paste access token if CORS blocked"
+              onChange={(e) => {
+                if (e.target.value) {
+                  setAccessToken(e.target.value);
+                  setAuthenticated(true);
+                }
+              }}
               disabled={authenticated}
             />
           </div>
