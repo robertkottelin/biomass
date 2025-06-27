@@ -300,17 +300,18 @@ const ForestBiomassApp = () => {
   };
 
   // Process Sentinel-2 NDVI data using Sentinel Hub Statistical API
-  const processSentinel2NDVI = async (product, polygon) => {
+  const processSentinel2NDVI = async (product, polygon, cloudCoverage) => {
     const acquisitionDate = new Date(product.ContentDate.Start);
     const dateStr = acquisitionDate.toISOString().split('T')[0];
     
-    // NDVI evalscript for Statistical API - FIXED VERSION
+    // NDVI evalscript for Statistical API - OPTIMIZED VERSION
     const evalscript = `
       //VERSION=3
       function setup() {
         return {
           input: [{
-            bands: ["B04", "B08", "SCL", "dataMask"]
+            bands: ["B04", "B08", "SCL", "dataMask"],
+            units: "DN"
           }],
           output: [
             {
@@ -335,13 +336,38 @@ const ForestBiomassApp = () => {
           };
         }
         
-        // Cloud masking using SCL band - less aggressive filtering
-        // Only exclude thick clouds (9) and cirrus (10)
-        const cloudMask = [9, 10].includes(samples.SCL) ? 0 : 1;
+        // Less aggressive cloud masking - SCL classification:
+        // 0: No Data, 1: Saturated/Defective
+        // 2: Dark Area Pixels, 3: Cloud Shadows
+        // 4: Vegetation, 5: Bare Soils
+        // 6: Water, 7: Unclassified
+        // 8: Cloud medium probability, 9: Cloud high probability
+        // 10: Thin cirrus, 11: Snow/Ice
+        // Only exclude high confidence clouds and no data
+        const scl = samples.SCL;
+        const cloudMask = (scl === 0 || scl === 1 || scl === 9) ? 0 : 1;
         
         // Calculate NDVI with bounds checking
-        const denominator = samples.B08 + samples.B04;
-        const ndvi = denominator !== 0 ? (samples.B08 - samples.B04) / denominator : 0;
+        const red = samples.B04;
+        const nir = samples.B08;
+        const denominator = nir + red;
+        
+        if (denominator === 0) {
+          return {
+            ndvi: [0],
+            dataMask: [0]
+          };
+        }
+        
+        const ndvi = (nir - red) / denominator;
+        
+        // Validate NDVI range
+        if (ndvi < -1 || ndvi > 1 || isNaN(ndvi)) {
+          return {
+            ndvi: [0],
+            dataMask: [0]
+          };
+        }
         
         return {
           ndvi: [ndvi],
@@ -352,13 +378,13 @@ const ForestBiomassApp = () => {
     
     const coordinates = polygon.coords.map(coord => [coord[1], coord[0]]); // lon, lat
     
-    // Extend time range to ±3 days to increase chance of finding data
+    // Extend time range to ±7 days for increased data availability
     const startDate = new Date(acquisitionDate);
     const endDate = new Date(acquisitionDate);
-    startDate.setDate(startDate.getDate() - 3);
-    endDate.setDate(endDate.getDate() + 3);
+    startDate.setDate(startDate.getDate() - 7);
+    endDate.setDate(endDate.getDate() + 7);
     
-    // Statistical API request payload - FIXED VERSION
+    // Statistical API request payload - OPTIMIZED VERSION
     const statsRequest = {
       input: {
         bounds: {
@@ -374,20 +400,21 @@ const ForestBiomassApp = () => {
           type: "sentinel-2-l2a",
           dataFilter: {
             timeRange: {
-              from: `${startDate.toISOString()}`,
-              to: `${endDate.toISOString()}`
+              from: startDate.toISOString(),
+              to: endDate.toISOString()
             },
+            maxCloudCoverage: cloudCoverage / 100,
             mosaickingOrder: "leastCC"
           }
         }]
       },
       aggregation: {
         timeRange: {
-          from: `${startDate.toISOString()}`,
-          to: `${endDate.toISOString()}`
+          from: startDate.toISOString(),
+          to: endDate.toISOString()
         },
         aggregationInterval: {
-          of: "P7D"
+          of: "P15D"  // 15-day interval to capture at least one scene
         },
         evalscript: evalscript,
         resx: 10,
@@ -474,19 +501,33 @@ const ForestBiomassApp = () => {
               // Check different possible response structures
               let ndviValue = null;
               
-              // Structure 1: bands.B0.stats
+              // Debug logging to understand response structure
+              console.log('NDVI Output structure:', JSON.stringify(ndviOutput, null, 2));
+              
+              // Structure 1: bands.B0.stats (standard structure)
               if (ndviOutput.bands && ndviOutput.bands.B0 && ndviOutput.bands.B0.stats) {
                 const stats = ndviOutput.bands.B0.stats;
-                ndviValue = stats.mean !== undefined ? stats.mean : 
-                           (stats.percentiles && stats.percentiles['50.0'] !== undefined ? stats.percentiles['50.0'] :
-                           (stats.percentiles && stats.percentiles['50'] !== undefined ? stats.percentiles['50'] : null));
+                console.log('Stats found:', stats);
+                
+                // Check if we have valid data (not all pixels masked)
+                if (stats.sampleCount > 0 && stats.sampleCount > stats.noDataCount) {
+                  ndviValue = stats.mean !== undefined ? stats.mean : 
+                             (stats.percentiles && stats.percentiles['50.0'] !== undefined ? stats.percentiles['50.0'] :
+                             (stats.percentiles && stats.percentiles['50'] !== undefined ? stats.percentiles['50'] : null));
+                } else {
+                  console.warn(`All pixels masked - sampleCount: ${stats.sampleCount}, noDataCount: ${stats.noDataCount}`);
+                }
               }
-              // Structure 2: direct stats
+              // Structure 2: direct stats (alternative structure)
               else if (ndviOutput.stats) {
                 const stats = ndviOutput.stats;
-                ndviValue = stats.mean !== undefined ? stats.mean :
-                           (stats.percentiles && stats.percentiles['50.0'] !== undefined ? stats.percentiles['50.0'] :
-                           (stats.percentiles && stats.percentiles['50'] !== undefined ? stats.percentiles['50'] : null));
+                console.log('Direct stats found:', stats);
+                
+                if (stats.sampleCount > 0 && stats.sampleCount > stats.noDataCount) {
+                  ndviValue = stats.mean !== undefined ? stats.mean :
+                             (stats.percentiles && stats.percentiles['50.0'] !== undefined ? stats.percentiles['50.0'] :
+                             (stats.percentiles && stats.percentiles['50'] !== undefined ? stats.percentiles['50'] : null));
+                }
               }
               
               if (ndviValue !== null && !isNaN(ndviValue) && ndviValue >= -1 && ndviValue <= 1) {
@@ -1312,6 +1353,8 @@ protocol/openid-connect/token`}
           <li>Statistical API endpoint: https://sh.dataspace.copernicus.eu/api/v1/statistics</li>
           <li>Error handling: 3 retries per request with exponential backoff</li>
           <li>Biomass estimation: Empirical exponential model based on NDVI</li>
+          <li>OPTIMIZED: Extended temporal window (±7 days), refined SCL masking, enhanced debug logging</li>
+          <li>VALIDATED: Response structure checks sampleCount is bigger noDataCount before processing statistics</li>
         </ul>
       </div>
     </div>
