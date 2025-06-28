@@ -423,7 +423,35 @@ const ForestBiomassApp = () => {
     startDate.setDate(startDate.getDate() - dayExtension);
     endDate.setDate(endDate.getDate() + dayExtension);
     
-    // ENHANCED Statistical API request
+    // Calculate polygon bounds to determine appropriate resolution
+    const lats = coordinates.map(c => c[1]);
+    const lons = coordinates.map(c => c[0]);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLon = Math.min(...lons);
+    const maxLon = Math.max(...lons);
+    
+    // Calculate approximate area dimensions in meters (rough estimation at ~61°N)
+    const latDiff = maxLat - minLat;
+    const lonDiff = maxLon - minLon;
+    const metersPerDegreeLat = 111320; // meters per degree latitude
+    const metersPerDegreeLon = 111320 * Math.cos(61 * Math.PI / 180); // ~54000m at 61°N
+    
+    const widthMeters = lonDiff * metersPerDegreeLon;
+    const heightMeters = latDiff * metersPerDegreeLat;
+    
+    // Calculate required resolution to stay within API limits
+    // Statistical API has max 1500m/pixel for S2L2A
+    const maxDimension = Math.max(widthMeters, heightMeters);
+    const minResolution = Math.max(10, Math.ceil(maxDimension / 2500)); // Max 2500 pixels per dimension
+    
+    // Ensure resolution doesn't exceed 1000m (safety margin below 1500m limit)
+    const safeResolution = Math.min(minResolution, 1000);
+    
+    console.log(`Polygon dimensions: ${(widthMeters/1000).toFixed(1)}km x ${(heightMeters/1000).toFixed(1)}km`);
+    console.log(`Calculated resolution: ${safeResolution}m (limit: 1500m)`);
+    
+    // RESOLUTION-AWARE Statistical API request
     const statsRequest = {
       input: {
         bounds: {
@@ -442,7 +470,7 @@ const ForestBiomassApp = () => {
               from: startDate.toISOString(),
               to: endDate.toISOString()
             },
-            maxCloudCoverage: isWinterMonth ? 0.5 : cloudCoverage / 100, // More lenient for winter
+            maxCloudCoverage: isWinterMonth ? 0.5 : cloudCoverage / 100,
             mosaickingOrder: "leastCC"
           }
         }]
@@ -453,11 +481,11 @@ const ForestBiomassApp = () => {
           to: endDate.toISOString()
         },
         aggregationInterval: {
-          of: isWinterMonth ? "P42D" : "P28D"  // Longer interval for winter
+          of: isWinterMonth ? "P42D" : "P28D"
         },
         evalscript: evalscript,
-        resx: 10,
-        resy: 10
+        resx: safeResolution,
+        resy: safeResolution
       },
       calculations: {
         default: {
@@ -1502,7 +1530,7 @@ protocol/openid-connect/token`}
           <li><strong>Processing Details:</strong>
             <ul>
               <li>NDVI: (B08 - B04) / (B08 + B04) | Range: [-1, 1]</li>
-              <li>NDSI: (B03 - B11) / (B03 + B11) | Snow threshold: bigger than 0.4</li>
+              <li>NDSI: (B03 - B11) / (B03 + B11) | Snow threshold: bigger 0.4</li>
               <li>Resolution: 10m (B04/B08) | Cloud coverage: Tile-based metadata</li>
               <li>Aggregation: P42D (winter) | P28D (other seasons)</li>
             </ul>
