@@ -596,15 +596,14 @@ const ForestBiomassApp = () => {
     try {
       const selectedForest = selectedForests[selectedForestIndex];
       const endDate = new Date().toISOString().split('T')[0];
-      const startDate = '2015-07-01';
 
       // Batch requests by year
-      const startYear = 2015;
+      const startYear = 2024;
       const endYear = new Date().getFullYear();
       const allProducts = [];
 
       for (let year = startYear; year <= endYear; year++) {
-        const yearStart = year === 2015 ? '2015-07-01' : `${year}-01-01`;
+        const yearStart = year === 2024 ? '2024-01-01' : `${year}-01-01`;
         const yearEnd = year === endYear ? endDate : `${year}-12-31`;
 
         setProcessingStatus(`Fetching data for ${year}...`);
