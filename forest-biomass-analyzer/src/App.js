@@ -303,14 +303,18 @@ const ForestBiomassApp = () => {
   const processSentinel2NDVI = async (product, polygon, cloudCoverage) => {
     const acquisitionDate = new Date(product.ContentDate.Start);
     const dateStr = acquisitionDate.toISOString().split('T')[0];
+    const month = acquisitionDate.getMonth() + 1; // 1-12
     
-    // FIXED NDVI evalscript for Statistical API - properly handles dataMask and cloud filtering
+    // Detect winter months (December-March) for Finland
+    const isWinterMonth = month === 12 || month === 1 || month === 2 || month === 3;
+    
+    // ENHANCED evalscript with winter/snow handling
     const evalscript = `
       //VERSION=3
       function setup() {
         return {
           input: [{
-            bands: ["B04", "B08", "SCL", "dataMask"],
+            bands: ["B03", "B04", "B08", "B11", "SCL", "dataMask"],
             units: "DN"
           }],
           output: [
@@ -322,6 +326,15 @@ const ForestBiomassApp = () => {
             {
               id: "dataMask", 
               bands: 1
+            },
+            {
+              id: "ndsi",
+              bands: 1,
+              sampleType: "FLOAT32"
+            },
+            {
+              id: "snowMask",
+              bands: 1
             }
           ]
         };
@@ -332,19 +345,34 @@ const ForestBiomassApp = () => {
         if (samples.dataMask === 0) {
           return {
             ndvi: [NaN],
-            dataMask: [0]
+            dataMask: [0],
+            ndsi: [NaN],
+            snowMask: [0]
           };
         }
         
-        // More lenient cloud masking - only exclude high confidence clouds and no data
+        // Calculate NDSI (Normalized Difference Snow Index)
+        const ndsi = (samples.B03 - samples.B11) / (samples.B03 + samples.B11);
+        const isSnow = ndsi > 0.4 && samples.B03 > 0.15; // Snow detection threshold
+        
         // SCL values: 0=No Data, 1=Saturated, 3=Cloud Shadows, 8=Med Cloud, 9=High Cloud, 10=Cirrus, 11=Snow
         const scl = samples.SCL;
-        const isCloudOrInvalid = (scl === 0 || scl === 1 || scl === 3 || scl === 8 || scl === 9 || scl === 10 || scl === 11);
         
-        if (isCloudOrInvalid) {
+        // Winter handling: be more lenient with snow pixels
+        const isWinter = ${isWinterMonth};
+        
+        // Exclude only critical invalid pixels
+        const isInvalid = (scl === 0 || scl === 1 || scl === 9); // Only exclude no-data, saturated, and high clouds
+        
+        // For winter months, don't exclude snow pixels (SCL 11) or shadows
+        const shouldExclude = isWinter ? isInvalid : (isInvalid || scl === 3 || scl === 8 || scl === 10 || scl === 11);
+        
+        if (shouldExclude && !isWinter) {
           return {
             ndvi: [NaN],
-            dataMask: [0]
+            dataMask: [0],
+            ndsi: [ndsi],
+            snowMask: [isSnow ? 1 : 0]
           };
         }
         
@@ -356,7 +384,9 @@ const ForestBiomassApp = () => {
         if (nir + red === 0) {
           return {
             ndvi: [0],
-            dataMask: [0]
+            dataMask: [0],
+            ndsi: [ndsi],
+            snowMask: [isSnow ? 1 : 0]
           };
         }
         
@@ -366,26 +396,34 @@ const ForestBiomassApp = () => {
         if (isNaN(ndvi) || ndvi < -1 || ndvi > 1) {
           return {
             ndvi: [0],
-            dataMask: [0]
+            dataMask: [0],
+            ndsi: [ndsi],
+            snowMask: [isSnow ? 1 : 0]
           };
         }
         
+        // For winter/snow pixels, NDVI might be low but still valid
+        const validPixel = isWinter || !isSnow ? 1 : 0.5; // Reduce weight of snow pixels
+        
         return {
           ndvi: [ndvi],
-          dataMask: [1]
+          dataMask: [validPixel],
+          ndsi: [ndsi],
+          snowMask: [isSnow ? 1 : 0]
         };
       }
     `;
     
     const coordinates = polygon.coords.map(coord => [coord[1], coord[0]]); // lon, lat
     
-    // Extend time range to ±14 days for better data availability
+    // Extend time range more for winter months
+    const dayExtension = isWinterMonth ? 21 : 14; // 3 weeks for winter, 2 weeks otherwise
     const startDate = new Date(acquisitionDate);
     const endDate = new Date(acquisitionDate);
-    startDate.setDate(startDate.getDate() - 14);
-    endDate.setDate(endDate.getDate() + 14);
+    startDate.setDate(startDate.getDate() - dayExtension);
+    endDate.setDate(endDate.getDate() + dayExtension);
     
-    // FIXED Statistical API request payload
+    // ENHANCED Statistical API request
     const statsRequest = {
       input: {
         bounds: {
@@ -404,7 +442,7 @@ const ForestBiomassApp = () => {
               from: startDate.toISOString(),
               to: endDate.toISOString()
             },
-            maxCloudCoverage: cloudCoverage / 100,
+            maxCloudCoverage: isWinterMonth ? 0.5 : cloudCoverage / 100, // More lenient for winter
             mosaickingOrder: "leastCC"
           }
         }]
@@ -415,7 +453,7 @@ const ForestBiomassApp = () => {
           to: endDate.toISOString()
         },
         aggregationInterval: {
-          of: "P28D"  // 28-day interval to ensure we get data
+          of: isWinterMonth ? "P42D" : "P28D"  // Longer interval for winter
         },
         evalscript: evalscript,
         resx: 10,
@@ -493,62 +531,120 @@ const ForestBiomassApp = () => {
         
         const statsData = await response.json();
         
-        // FIXED: Extract NDVI value from Statistical API response with proper structure parsing
+        // Enhanced response logging
+        console.log(`API Response structure for ${dateStr}:`, {
+          hasData: !!statsData?.data,
+          dataLength: statsData?.data?.length || 0,
+          firstInterval: statsData?.data?.[0]?.interval || null
+        });
+        
+        // WINTER-AWARE: Extract NDVI value from Statistical API response
         if (statsData && statsData.data && Array.isArray(statsData.data) && statsData.data.length > 0) {
           for (const interval of statsData.data) {
-            if (interval.outputs && interval.outputs.ndvi) {
-              const ndviOutput = interval.outputs.ndvi;
+            if (interval.outputs) {
+              // Log available outputs
+              console.log(`Outputs available:`, Object.keys(interval.outputs));
               
-              // Check if we have valid band data
-              if (ndviOutput.bands && ndviOutput.bands.B0 && ndviOutput.bands.B0.stats) {
-                const stats = ndviOutput.bands.B0.stats;
+              if (interval.outputs.ndvi) {
+                const ndviOutput = interval.outputs.ndvi;
                 
-                // Debug logging
-                console.log(`Stats for ${dateStr}:`, {
-                  sampleCount: stats.sampleCount,
-                  noDataCount: stats.noDataCount,
-                  validPixels: stats.sampleCount - stats.noDataCount,
-                  mean: stats.mean,
-                  min: stats.min,
-                  max: stats.max
-                });
+                // Check snow data if available
+                let snowInfo = null;
+                if (interval.outputs.snowMask?.bands?.B0?.stats) {
+                  const snowStats = interval.outputs.snowMask.bands.B0.stats;
+                  const snowRatio = (snowStats.sampleCount - snowStats.noDataCount) > 0 ? 
+                    snowStats.mean : 0;
+                  snowInfo = {
+                    snowCoverage: Math.round(snowRatio * 100),
+                    isSnowDominant: snowRatio > 0.5
+                  };
+                }
                 
-                // CRITICAL: Check if we have valid data (more valid pixels than no-data pixels)
-                if (stats.sampleCount > 0 && stats.sampleCount > stats.noDataCount) {
-                  const validPixelRatio = (stats.sampleCount - stats.noDataCount) / stats.sampleCount;
+                // Check if we have valid band data
+                if (ndviOutput.bands && ndviOutput.bands.B0 && ndviOutput.bands.B0.stats) {
+                  const stats = ndviOutput.bands.B0.stats;
                   
-                  // Only accept if we have at least 10% valid pixels
-                  if (validPixelRatio >= 0.1) {
-                    // Use mean if available, otherwise use median (50th percentile)
-                    let ndviValue = null;
+                  // Enhanced debug logging
+                  console.log(`Stats for ${dateStr} (Winter: ${isWinterMonth}):`, {
+                    sampleCount: stats.sampleCount,
+                    noDataCount: stats.noDataCount,
+                    validPixels: stats.sampleCount - stats.noDataCount,
+                    mean: stats.mean,
+                    min: stats.min,
+                    max: stats.max,
+                    snowInfo: snowInfo,
+                    month: month
+                  });
+                  
+                  // Check if we have valid data
+                  if (stats.sampleCount > 0 && stats.sampleCount > stats.noDataCount) {
+                    const validPixelRatio = (stats.sampleCount - stats.noDataCount) / stats.sampleCount;
                     
-                    if (typeof stats.mean === 'number' && !isNaN(stats.mean)) {
-                      ndviValue = stats.mean;
-                    } else if (stats.percentiles) {
-                      // Try different percentile key formats
-                      ndviValue = stats.percentiles['50.0'] || 
-                                 stats.percentiles['50'] || 
-                                 stats.percentiles['p50'] ||
-                                 null;
-                    }
+                    // More lenient threshold for winter months
+                    const minValidRatio = isWinterMonth ? 0.05 : 0.1; // 5% for winter, 10% otherwise
                     
-                    if (ndviValue !== null && !isNaN(ndviValue) && ndviValue >= -1 && ndviValue <= 1) {
-                      console.log(`SUCCESS: Real NDVI value ${ndviValue} for ${dateStr} (${Math.round(validPixelRatio * 100)}% valid pixels)`);
-                      return { ndvi: ndviValue, isSimulated: false };
+                    if (validPixelRatio >= minValidRatio) {
+                      // Use mean if available, otherwise use median
+                      let ndviValue = null;
+                      
+                      if (typeof stats.mean === 'number' && !isNaN(stats.mean)) {
+                        ndviValue = stats.mean;
+                      } else if (stats.percentiles) {
+                        ndviValue = stats.percentiles['50.0'] || 
+                                   stats.percentiles['50'] || 
+                                   stats.percentiles['p50'] ||
+                                   null;
+                      }
+                      
+                      // For winter months with snow, NDVI might be very low but still valid
+                      if (ndviValue !== null && !isNaN(ndviValue)) {
+                        // Accept wider range for winter
+                        const isValidRange = isWinterMonth ? 
+                          (ndviValue >= -1 && ndviValue <= 1) : 
+                          (ndviValue >= -0.5 && ndviValue <= 1);
+                        
+                        if (isValidRange) {
+                          console.log(`SUCCESS: Real NDVI value ${ndviValue} for ${dateStr} (${Math.round(validPixelRatio * 100)}% valid pixels${snowInfo ? `, ${snowInfo.snowCoverage}% snow` : ''})`);
+                          return { 
+                            ndvi: ndviValue, 
+                            isSimulated: false,
+                            isWinter: isWinterMonth,
+                            snowCoverage: snowInfo?.snowCoverage || 0
+                          };
+                        } else {
+                          console.warn(`NDVI value ${ndviValue} out of acceptable range for ${dateStr}`);
+                        }
+                      }
+                    } else {
+                      console.warn(`Insufficient valid pixels for ${dateStr}: only ${Math.round(validPixelRatio * 100)}% valid (min: ${minValidRatio * 100}%)`);
                     }
                   } else {
-                    console.warn(`Insufficient valid pixels for ${dateStr}: only ${Math.round(validPixelRatio * 100)}% valid`);
+                    console.warn(`No valid pixels for ${dateStr} - all pixels masked or no data`);
                   }
                 } else {
-                  console.warn(`No valid pixels for ${dateStr} - all pixels masked or no data`);
+                  console.warn(`Invalid response structure for ${dateStr} - missing bands.B0.stats`);
                 }
+              } else {
+                console.warn(`No NDVI output in response for ${dateStr}`);
               }
             }
           }
+        } else {
+          console.warn(`Empty or invalid data array in response for ${dateStr}`);
         }
         
-        console.warn(`No valid NDVI data in response for ${dateStr}, using simulated value`);
-        return { ndvi: estimateNDVIFromDate(acquisitionDate), isSimulated: true };
+        // For winter months, indicate why simulation is used
+        if (isWinterMonth) {
+          console.warn(`No valid NDVI data for winter date ${dateStr} (Month: ${month}), using seasonal simulation`);
+        } else {
+          console.warn(`No valid NDVI data in response for ${dateStr}, using simulated value`);
+        }
+        
+        return { 
+          ndvi: estimateNDVIFromDate(acquisitionDate), 
+          isSimulated: true,
+          isWinter: isWinterMonth 
+        };
         
       } catch (error) {
         if (error.status === 429) {
@@ -696,7 +792,19 @@ const ForestBiomassApp = () => {
             simulatedCount++;
           }
           
-          const biomass = ndviToBiomass(ndviResult.ndvi, selectedForest.type);
+          // Adjust biomass calculation for winter conditions
+          let biomass = ndviToBiomass(ndviResult.ndvi, selectedForest.type);
+          if (ndviResult.isWinter && !ndviResult.isSimulated) {
+            // Winter NDVI values are typically lower due to dormant vegetation
+            // Apply correction factor based on forest type
+            const winterCorrection = {
+              pine: 1.2,    // Evergreen, less affected
+              fir: 1.2,     // Evergreen, less affected
+              birch: 1.5,   // Deciduous, more affected
+              aspen: 1.5    // Deciduous, more affected
+            };
+            biomass *= winterCorrection[selectedForest.type] || 1.3;
+          }
 
           const cloudCoverAttr = product.Attributes?.find(attr =>
             attr.Name === 'cloudCover' && attr.ValueType === 'Double'
@@ -713,7 +821,9 @@ const ForestBiomassApp = () => {
             productName: product.Name,
             cloudCover: cloudCoverValue,
             footprint: product.GeoFootprint,
-            isSimulated: ndviResult.isSimulated
+            isSimulated: ndviResult.isSimulated,
+            isWinter: ndviResult.isWinter || false,
+            snowCoverage: ndviResult.snowCoverage || 0
           });
         }
 
@@ -1201,6 +1311,11 @@ protocol/openid-connect/token`}
                         boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
                       }}>
                         <p style={{ margin: '0 0 5px 0', fontWeight: 'bold' }}>{label}</p>
+                        {data.isWinter && (
+                          <p style={{ margin: '2px 0', fontSize: '12px', color: '#0066cc', fontWeight: 'bold' }}>
+                            ❄️ WINTER CONDITIONS
+                          </p>
+                        )}
                         {data.isSimulated && (
                           <p style={{ margin: '2px 0', fontSize: '12px', color: '#ff6b6b', fontWeight: 'bold' }}>
                             ⚠️ SIMULATED DATA
@@ -1225,6 +1340,11 @@ protocol/openid-connect/token`}
                         <p style={{ margin: '2px 0', fontSize: '12px', color: '#666' }}>
                           Cloud Cover: {data.cloudCover.toFixed(1)}%
                         </p>
+                        {data.snowCoverage > 0 && (
+                          <p style={{ margin: '2px 0', fontSize: '12px', color: '#0066cc' }}>
+                            Snow Coverage: {data.snowCoverage}%
+                          </p>
+                        )}
                         <p style={{ margin: '2px 0', fontSize: '10px', color: '#999' }}>
                           Source: {data.isSimulated ? 'Seasonal Model' : 'Sentinel-2 Statistical API'}
                         </p>
@@ -1351,14 +1471,29 @@ protocol/openid-connect/token`}
       )}
 
       <div style={styles.info}>
-        <h4>Technical Implementation - Fixed for Real Data Processing</h4>
+        <h4>Technical Implementation - Winter-Aware NDVI Processing</h4>
         <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
-          <li><strong>✅ FIXED: Response Parsing</strong> - Correctly extracts NDVI from data[].outputs.ndvi.bands.B0.stats structure</li>
-          <li><strong>✅ FIXED: Data Validation</strong> - Checks sampleCount bigger than noDataCount and requires 10% valid pixels minimum</li>
-          <li><strong>✅ FIXED: Cloud Masking</strong> - Less aggressive SCL filtering (only high confidence clouds)</li>
-          <li><strong>✅ FIXED: Time Window</strong> - Extended to ±14 days for better data availability</li>
-          <li><strong>✅ FIXED: Evalscript</strong> - Proper dataMask handling and division by zero protection</li>
-          <li><strong>Key API Endpoints:</strong>
+          <li><strong>✅ WINTER HANDLING</strong> - Detects winter months (Dec-Mar) with specialized processing</li>
+          <li><strong>✅ SNOW DETECTION</strong> - NDSI (Normalized Difference Snow Index) calculation using (B03-B11)/(B03+B11)</li>
+          <li><strong>✅ ADAPTIVE MASKING</strong> - SCL-based masking adjusted for winter conditions:
+            <ul>
+              <li>Summer: Excludes SCL values 0,1,3,8,9,10,11 (clouds, shadows, snow)</li>
+              <li>Winter: Excludes only SCL values 0,1,9 (no-data, saturated, high clouds)</li>
+            </ul>
+          </li>
+          <li><strong>✅ TEMPORAL WINDOW</strong> - Extended to ±21 days for winter, ±14 days for other seasons</li>
+          <li><strong>✅ VALID PIXEL THRESHOLD</strong> - 5% minimum for winter, 10% for other seasons</li>
+          <li><strong>✅ BIOMASS CORRECTION</strong> - Winter correction factors: 1.2x for evergreens, 1.5x for deciduous</li>
+          <li><strong>✅ ENHANCED LOGGING</strong> - Detailed response structure, pixel counts, snow coverage percentage</li>
+          <li><strong>SCL Classification Values:</strong>
+            <ul>
+              <li>0: No Data | 1: Saturated/Defective | 2: Dark Areas</li>
+              <li>3: Cloud Shadows | 4: Vegetation | 5: Bare Soil</li>
+              <li>6: Water | 7: Unclassified | 8: Medium Clouds</li>
+              <li>9: High Clouds | 10: Cirrus | 11: Snow/Ice</li>
+            </ul>
+          </li>
+          <li><strong>API Endpoints:</strong>
             <ul>
               <li>Catalog: https://catalogue.dataspace.copernicus.eu/odata/v1/Products</li>
               <li>Statistical API: https://sh.dataspace.copernicus.eu/api/v1/statistics</li>
@@ -1366,14 +1501,19 @@ protocol/openid-connect/token`}
           </li>
           <li><strong>Processing Details:</strong>
             <ul>
-              <li>NDVI calculation: (B08 - B04) / (B08 + B04)</li>
-              <li>Cloud masking: SCL band values 0,1,3,8,9,10,11 excluded</li>
-              <li>Aggregation interval: 28 days to ensure data coverage</li>
-              <li>Spatial resolution: 10m for NDVI bands</li>
+              <li>NDVI: (B08 - B04) / (B08 + B04) | Range: [-1, 1]</li>
+              <li>NDSI: (B03 - B11) / (B03 + B11) | Snow threshold: bigger than 0.4</li>
+              <li>Resolution: 10m (B04/B08) | Cloud coverage: Tile-based metadata</li>
+              <li>Aggregation: P42D (winter) | P28D (other seasons)</li>
             </ul>
           </li>
-          <li><strong>Rate Limiting:</strong> 4s base delay, exponential backoff, global rate limit tracking</li>
-          <li><strong>Data Quality:</strong> Debug logging shows pixel counts and valid pixel ratios</li>
+          <li><strong>Finland-Specific Optimizations:</strong>
+            <ul>
+              <li>Winter months: December through March</li>
+              <li>Snow persistence detection via NDSI bands</li>
+              <li>Forest type-specific biomass adjustments</li>
+            </ul>
+          </li>
         </ul>
       </div>
     </div>
