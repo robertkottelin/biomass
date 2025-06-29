@@ -402,11 +402,16 @@ const ForestBiomassApp = () => {
     
     const coordinates = polygon.coords.map(coord => [coord[1], coord[0]]); // lon, lat
     
-    // Create time range for aggregation
-    // Use single day aggregation to avoid resolution issues
-    const startDate = new Date(acquisitionDate);
-    const endDate = new Date(acquisitionDate);
-    endDate.setDate(endDate.getDate() + 1); // Single day window
+    // Create time range - wider window for input data filter
+    const dataStartDate = new Date(acquisitionDate);
+    const dataEndDate = new Date(acquisitionDate);
+    dataStartDate.setDate(dataStartDate.getDate() - 7); // 7 days before
+    dataEndDate.setDate(dataEndDate.getDate() + 7); // 7 days after
+    
+    // Aggregation period for the specific acquisition date
+    const aggStartDate = new Date(acquisitionDate);
+    const aggEndDate = new Date(acquisitionDate);
+    aggEndDate.setDate(aggEndDate.getDate() + 1); // Single day for aggregation
     
     // Statistical API request with proper resolution handling
     const statsRequest = {
@@ -424,8 +429,8 @@ const ForestBiomassApp = () => {
           type: "sentinel-2-l2a",
           dataFilter: {
             timeRange: {
-              from: startDate.toISOString(),
-              to: endDate.toISOString()
+              from: dataStartDate.toISOString(),
+              to: dataEndDate.toISOString()
             },
             maxCloudCoverage: cloudCoverage / 100,
             mosaickingOrder: "leastCC"
@@ -434,11 +439,11 @@ const ForestBiomassApp = () => {
       },
       aggregation: {
         timeRange: {
-          from: startDate.toISOString(),
-          to: endDate.toISOString()
+          from: aggStartDate.toISOString(),
+          to: aggEndDate.toISOString()
         },
         aggregationInterval: {
-          of: "P1D" // Single day to avoid resolution multiplication
+          of: "P1D" // Single day aggregation
         },
         evalscript: evalscript,
         // CRITICAL: Set resolution to stay under 1500m limit
@@ -458,7 +463,7 @@ const ForestBiomassApp = () => {
       }
     };
     
-    console.log(`Processing ${dateStr} at 100m resolution`);
+    console.log(`Processing ${dateStr}: searching ±7 days window at 100m resolution`);
     
     let retries = 0;
     const maxRetries = 3;
