@@ -110,6 +110,7 @@ const ForestBiomassApp = () => {
   const [trendStartDate, setTrendStartDate] = useState('');
   const [trendEndDate, setTrendEndDate] = useState('');
   const [skippedDataCount, setSkippedDataCount] = useState(0);
+  const [debugMode, setDebugMode] = useState(true); // Enable debug logging
   const [apiStats, setApiStats] = useState({
     totalRequests: 0,
     successfulRequests: 0,
@@ -305,7 +306,7 @@ const ForestBiomassApp = () => {
   };
 
   // Process Sentinel-2 NDVI data using Sentinel Hub Statistical API - REAL DATA ONLY
-  const processSentinel2NDVI = async (product, polygon) => {
+  const processSentinel2NDVI = async (product, polygon, cloudCoverage, debugMode = false) => {
     const acquisitionDate = new Date(product.ContentDate.Start);
     const dateStr = acquisitionDate.toISOString().split('T')[0];
     const month = acquisitionDate.getMonth() + 1; // 1-12
@@ -313,7 +314,7 @@ const ForestBiomassApp = () => {
     // Detect winter months (December-March) for Finland
     const isWinterMonth = month === 12 || month === 1 || month === 2 || month === 3;
     
-    // ENHANCED evalscript with winter/snow handling
+    // ENHANCED evalscript with correct output configuration
     const evalscript = `
       //VERSION=3
       function setup() {
@@ -330,7 +331,8 @@ const ForestBiomassApp = () => {
             },
             {
               id: "dataMask", 
-              bands: 1
+              bands: 1,
+              sampleType: "UINT8"
             }
           ]
         };
@@ -402,16 +404,11 @@ const ForestBiomassApp = () => {
     
     const coordinates = polygon.coords.map(coord => [coord[1], coord[0]]); // lon, lat
     
-    // Create time range - wider window for input data filter
-    const dataStartDate = new Date(acquisitionDate);
-    const dataEndDate = new Date(acquisitionDate);
-    dataStartDate.setDate(dataStartDate.getDate() - 7); // 7 days before
-    dataEndDate.setDate(dataEndDate.getDate() + 7); // 7 days after
-    
-    // Aggregation period for the specific acquisition date
-    const aggStartDate = new Date(acquisitionDate);
-    const aggEndDate = new Date(acquisitionDate);
-    aggEndDate.setDate(aggEndDate.getDate() + 1); // Single day for aggregation
+    // Create time range for aggregation
+    // Use single day aggregation to avoid resolution issues
+    const startDate = new Date(acquisitionDate);
+    const endDate = new Date(acquisitionDate);
+    endDate.setDate(endDate.getDate() + 1); // Single day window
     
     // Statistical API request with proper resolution handling
     const statsRequest = {
@@ -429,8 +426,8 @@ const ForestBiomassApp = () => {
           type: "sentinel-2-l2a",
           dataFilter: {
             timeRange: {
-              from: dataStartDate.toISOString(),
-              to: dataEndDate.toISOString()
+              from: startDate.toISOString(),
+              to: endDate.toISOString()
             },
             maxCloudCoverage: cloudCoverage / 100,
             mosaickingOrder: "leastCC"
@@ -439,11 +436,11 @@ const ForestBiomassApp = () => {
       },
       aggregation: {
         timeRange: {
-          from: aggStartDate.toISOString(),
-          to: aggEndDate.toISOString()
+          from: startDate.toISOString(),
+          to: endDate.toISOString()
         },
         aggregationInterval: {
-          of: "P1D" // Single day aggregation
+          of: "P1D" // Single day to avoid resolution multiplication
         },
         evalscript: evalscript,
         // CRITICAL: Set resolution to stay under 1500m limit
@@ -451,7 +448,7 @@ const ForestBiomassApp = () => {
         resy: 100  // 100m resolution
       },
       calculations: {
-        default: {
+        ndvi: {
           statistics: {
             default: {
               percentiles: {
@@ -463,7 +460,10 @@ const ForestBiomassApp = () => {
       }
     };
     
-    console.log(`Processing ${dateStr}: searching ±7 days window at 100m resolution`);
+    console.log(`Processing ${dateStr} at 100m resolution`);
+    if (debugMode) {
+      console.log('Stats Request:', JSON.stringify(statsRequest, null, 2));
+    }
     
     let retries = 0;
     const maxRetries = 3;
@@ -524,57 +524,127 @@ const ForestBiomassApp = () => {
         
         const statsData = await response.json();
         
+        // LOG COMPLETE RESPONSE STRUCTURE
+        if (debugMode) {
+          console.log('=== FULL API RESPONSE STRUCTURE ===');
+          console.log('Response type:', typeof statsData);
+          console.log('Response keys:', Object.keys(statsData));
+          console.log('Full response:', JSON.stringify(statsData, null, 2));
+        }
+        
         // Extract NDVI value from Statistical API response
         if (statsData && statsData.data && Array.isArray(statsData.data) && statsData.data.length > 0) {
-          for (const interval of statsData.data) {
-            if (interval.outputs && interval.outputs.ndvi) {
-              const ndviOutput = interval.outputs.ndvi;
-              
-              if (ndviOutput.bands && ndviOutput.bands.B0 && ndviOutput.bands.B0.stats) {
-                const stats = ndviOutput.bands.B0.stats;
-                
-                console.log(`Stats for ${dateStr}:`, {
-                  sampleCount: stats.sampleCount,
-                  noDataCount: stats.noDataCount,
-                  validPixels: stats.sampleCount - stats.noDataCount,
-                  mean: stats.mean,
-                  isWinter: isWinterMonth
-                });
-                
-                // Check if we have valid data
-                if (stats.sampleCount > 0 && stats.sampleCount > stats.noDataCount) {
-                  const validPixelRatio = (stats.sampleCount - stats.noDataCount) / stats.sampleCount;
-                  
-                  // More lenient threshold for winter months
-                  const minValidRatio = isWinterMonth ? 0.05 : 0.1;
-                  
-                  if (validPixelRatio >= minValidRatio) {
-                    // Use mean if available
-                    let ndviValue = null;
-                    
-                    if (typeof stats.mean === 'number' && !isNaN(stats.mean)) {
-                      ndviValue = stats.mean;
-                    } else if (stats.percentiles && stats.percentiles['50.0']) {
-                      ndviValue = stats.percentiles['50.0'];
-                    }
-                    
-                    if (ndviValue !== null && !isNaN(ndviValue)) {
-                      const isValidRange = ndviValue >= -1 && ndviValue <= 1;
-                      
-                      if (isValidRange) {
-                        console.log(`SUCCESS: Real NDVI value ${ndviValue} for ${dateStr}`);
-                        return { 
-                          ndvi: ndviValue, 
-                          isWinter: isWinterMonth,
-                          validPixelRatio: validPixelRatio
-                        };
-                      }
-                    }
-                  }
-                }
+          if (debugMode) {
+            console.log(`Found ${statsData.data.length} intervals in response`);
+          }
+          
+          for (let i = 0; i < statsData.data.length; i++) {
+            const interval = statsData.data[i];
+            if (debugMode) {
+              console.log(`\n=== Interval ${i} ===`);
+              console.log('Interval keys:', Object.keys(interval));
+              console.log('Interval from/to:', interval.interval?.from, '-', interval.interval?.to);
+            }
+            
+            if (interval.outputs) {
+              if (debugMode) {
+                console.log('Outputs keys:', Object.keys(interval.outputs));
+                console.log('Outputs structure:', JSON.stringify(interval.outputs, null, 2));
               }
+              
+              // Check both 'ndvi' and 'default' outputs
+              const ndviOutput = interval.outputs.ndvi || interval.outputs.default;
+              
+              if (ndviOutput) {
+                if (debugMode) {
+                  console.log('NDVI output found, structure:', JSON.stringify(ndviOutput, null, 2));
+                }
+                
+                if (ndviOutput.bands) {
+                  if (debugMode) {
+                    console.log('Bands keys:', Object.keys(ndviOutput.bands));
+                  }
+                  
+                  const band = ndviOutput.bands.B0 || ndviOutput.bands['0'];
+                  if (band && band.stats) {
+                    const stats = band.stats;
+                    
+                    if (debugMode) {
+                      console.log(`Stats for ${dateStr}:`, {
+                        sampleCount: stats.sampleCount,
+                        noDataCount: stats.noDataCount,
+                        validPixels: stats.sampleCount - stats.noDataCount,
+                        mean: stats.mean,
+                        min: stats.min,
+                        max: stats.max,
+                        stDev: stats.stDev,
+                        percentiles: stats.percentiles,
+                        isWinter: isWinterMonth
+                      });
+                    }
+                    
+                    // Check if we have valid data
+                    if (stats.sampleCount > 0 && stats.sampleCount > stats.noDataCount) {
+                      const validPixelRatio = (stats.sampleCount - stats.noDataCount) / stats.sampleCount;
+                      
+                      // More lenient threshold for winter months
+                      const minValidRatio = isWinterMonth ? 0.05 : 0.1;
+                      
+                      if (validPixelRatio >= minValidRatio) {
+                        // Use mean if available
+                        let ndviValue = null;
+                        
+                        if (typeof stats.mean === 'number' && !isNaN(stats.mean)) {
+                          ndviValue = stats.mean;
+                        } else if (stats.percentiles) {
+                          // Try different percentile keys
+                          ndviValue = stats.percentiles['50.0'] || 
+                                     stats.percentiles['50'] || 
+                                     stats.percentiles['p50'] ||
+                                     stats.percentiles[50] ||
+                                     null;
+                          if (debugMode) {
+                            console.log('Using percentile value:', ndviValue, 'from:', Object.keys(stats.percentiles));
+                          }
+                        }
+                        
+                        if (ndviValue !== null && !isNaN(ndviValue)) {
+                          const isValidRange = ndviValue >= -1 && ndviValue <= 1;
+                          
+                          if (isValidRange) {
+                            console.log(`SUCCESS: Real NDVI value ${ndviValue} for ${dateStr}`);
+                            return { 
+                              ndvi: ndviValue, 
+                              isWinter: isWinterMonth,
+                              validPixelRatio: validPixelRatio
+                            };
+                          } else if (debugMode) {
+                            console.log(`NDVI value ${ndviValue} out of range`);
+                          }
+                        } else if (debugMode) {
+                          console.log('No valid NDVI value found in stats');
+                        }
+                      } else if (debugMode) {
+                        console.log(`Insufficient valid pixels: ${(validPixelRatio * 100).toFixed(1)}%`);
+                      }
+                    } else if (debugMode) {
+                      console.log('No valid pixels in stats');
+                    }
+                  } else if (debugMode) {
+                    console.log('No stats found in band data');
+                  }
+                } else if (debugMode) {
+                  console.log('No bands found in NDVI output');
+                }
+              } else if (debugMode) {
+                console.log('No NDVI or default output found');
+              }
+            } else if (debugMode) {
+              console.log('No outputs found in interval');
             }
           }
+        } else if (debugMode) {
+          console.log('Invalid response structure - no data array');
         }
         
         console.warn(`No valid NDVI data for ${dateStr}. Skipping.`);
@@ -694,7 +764,7 @@ const ForestBiomassApp = () => {
           totalRequests++;
           
           try {
-            const ndviResult = await processSentinel2NDVI(product, selectedForest);
+                          const ndviResult = await processSentinel2NDVI(product, selectedForest, cloudCoverage, debugMode);
             
             if (ndviResult === null) {
               skippedCount++;
@@ -1041,6 +1111,16 @@ protocol/openid-connect/token`}
               value={cloudCoverage}
               onChange={(e) => setCloudCoverage(parseInt(e.target.value))}
             />
+          </div>
+          <div>
+            <label style={styles.label}>Debug Mode</label>
+            <input
+              type="checkbox"
+              checked={debugMode}
+              onChange={(e) => setDebugMode(e.target.checked)}
+              style={{ width: 'auto', marginTop: '8px' }}
+            />
+            <span style={{ marginLeft: '8px', fontSize: '14px' }}>Enable detailed API logging</span>
           </div>
         </div>
         <button
