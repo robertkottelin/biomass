@@ -105,10 +105,17 @@ const ForestBiomassApp = () => {
   const [authenticated, setAuthenticated] = useState(false);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
-  const [cloudCoverage, setCloudCoverage] = useState(30); // Increased default to 30%
+  const [cloudCoverage, setCloudCoverage] = useState(30);
   const [processingStatus, setProcessingStatus] = useState('');
   const [trendStartDate, setTrendStartDate] = useState('');
   const [trendEndDate, setTrendEndDate] = useState('');
+  const [skippedDataCount, setSkippedDataCount] = useState(0);
+  const [apiStats, setApiStats] = useState({
+    totalRequests: 0,
+    successfulRequests: 0,
+    emptyResponses: 0,
+    errors: 0
+  });
   const mapRef = useRef();
   
   // Use refs to avoid stale closure issues with token management
@@ -121,8 +128,6 @@ const ForestBiomassApp = () => {
   
   // Global rate limit state
   const [rateLimitExpiry, setRateLimitExpiry] = useState(0);
-  const [apiFailureCount, setApiFailureCount] = useState(0);
-  const [simulatedDataCount, setSimulatedDataCount] = useState(0);
 
   // Load GeometryUtil on mount
   useEffect(() => {
@@ -299,8 +304,8 @@ const ForestBiomassApp = () => {
     return data.value || [];
   };
 
-  // Process Sentinel-2 NDVI data using Sentinel Hub Statistical API - FIXED VERSION
-  const processSentinel2NDVI = async (product, polygon, cloudCoverage) => {
+  // Process Sentinel-2 NDVI data using Sentinel Hub Statistical API - REAL DATA ONLY
+  const processSentinel2NDVI = async (product, polygon) => {
     const acquisitionDate = new Date(product.ContentDate.Start);
     const dateStr = acquisitionDate.toISOString().split('T')[0];
     const month = acquisitionDate.getMonth() + 1; // 1-12
@@ -326,15 +331,6 @@ const ForestBiomassApp = () => {
             {
               id: "dataMask", 
               bands: 1
-            },
-            {
-              id: "ndsi",
-              bands: 1,
-              sampleType: "FLOAT32"
-            },
-            {
-              id: "snowMask",
-              bands: 1
             }
           ]
         };
@@ -344,16 +340,14 @@ const ForestBiomassApp = () => {
         // Check if pixel is valid (not no-data)
         if (samples.dataMask === 0) {
           return {
-            ndvi: [NaN],
-            dataMask: [0],
-            ndsi: [NaN],
-            snowMask: [0]
+            ndvi: NaN,
+            dataMask: 0
           };
         }
         
         // Calculate NDSI (Normalized Difference Snow Index)
         const ndsi = (samples.B03 - samples.B11) / (samples.B03 + samples.B11);
-        const isSnow = ndsi > 0.4 && samples.B03 > 0.15; // Snow detection threshold
+        const isSnow = ndsi > 0.4 && samples.B03 > 0.15;
         
         // SCL values: 0=No Data, 1=Saturated, 3=Cloud Shadows, 8=Med Cloud, 9=High Cloud, 10=Cirrus, 11=Snow
         const scl = samples.SCL;
@@ -362,17 +356,15 @@ const ForestBiomassApp = () => {
         const isWinter = ${isWinterMonth};
         
         // Exclude only critical invalid pixels
-        const isInvalid = (scl === 0 || scl === 1 || scl === 9); // Only exclude no-data, saturated, and high clouds
+        const isInvalid = (scl === 0 || scl === 1 || scl === 9);
         
         // For winter months, don't exclude snow pixels (SCL 11) or shadows
         const shouldExclude = isWinter ? isInvalid : (isInvalid || scl === 3 || scl === 8 || scl === 10 || scl === 11);
         
         if (shouldExclude && !isWinter) {
           return {
-            ndvi: [NaN],
-            dataMask: [0],
-            ndsi: [ndsi],
-            snowMask: [isSnow ? 1 : 0]
+            ndvi: NaN,
+            dataMask: 0
           };
         }
         
@@ -383,10 +375,8 @@ const ForestBiomassApp = () => {
         // Handle division by zero
         if (nir + red === 0) {
           return {
-            ndvi: [0],
-            dataMask: [0],
-            ndsi: [ndsi],
-            snowMask: [isSnow ? 1 : 0]
+            ndvi: 0,
+            dataMask: 0
           };
         }
         
@@ -395,63 +385,30 @@ const ForestBiomassApp = () => {
         // Validate NDVI range
         if (isNaN(ndvi) || ndvi < -1 || ndvi > 1) {
           return {
-            ndvi: [0],
-            dataMask: [0],
-            ndsi: [ndsi],
-            snowMask: [isSnow ? 1 : 0]
+            ndvi: 0,
+            dataMask: 0
           };
         }
         
         // For winter/snow pixels, NDVI might be low but still valid
-        const validPixel = isWinter || !isSnow ? 1 : 0.5; // Reduce weight of snow pixels
+        const validPixel = isWinter || !isSnow ? 1 : 0.5;
         
         return {
-          ndvi: [ndvi],
-          dataMask: [validPixel],
-          ndsi: [ndsi],
-          snowMask: [isSnow ? 1 : 0]
+          ndvi: ndvi,
+          dataMask: validPixel
         };
       }
     `;
     
     const coordinates = polygon.coords.map(coord => [coord[1], coord[0]]); // lon, lat
     
-    // Extend time range more for winter months
-    const dayExtension = isWinterMonth ? 21 : 14; // 3 weeks for winter, 2 weeks otherwise
+    // Create time range for aggregation
+    // Use single day aggregation to avoid resolution issues
     const startDate = new Date(acquisitionDate);
     const endDate = new Date(acquisitionDate);
-    startDate.setDate(startDate.getDate() - dayExtension);
-    endDate.setDate(endDate.getDate() + dayExtension);
+    endDate.setDate(endDate.getDate() + 1); // Single day window
     
-    // Calculate polygon bounds to determine appropriate resolution
-    const lats = coordinates.map(c => c[1]);
-    const lons = coordinates.map(c => c[0]);
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLon = Math.min(...lons);
-    const maxLon = Math.max(...lons);
-    
-    // Calculate approximate area dimensions in meters (rough estimation at ~61°N)
-    const latDiff = maxLat - minLat;
-    const lonDiff = maxLon - minLon;
-    const metersPerDegreeLat = 111320; // meters per degree latitude
-    const metersPerDegreeLon = 111320 * Math.cos(61 * Math.PI / 180); // ~54000m at 61°N
-    
-    const widthMeters = lonDiff * metersPerDegreeLon;
-    const heightMeters = latDiff * metersPerDegreeLat;
-    
-    // Calculate required resolution to stay within API limits
-    // Statistical API has max 1500m/pixel for S2L2A
-    const maxDimension = Math.max(widthMeters, heightMeters);
-    const minResolution = Math.max(10, Math.ceil(maxDimension / 2500)); // Max 2500 pixels per dimension
-    
-    // Ensure resolution doesn't exceed 1000m (safety margin below 1500m limit)
-    const safeResolution = Math.min(minResolution, 1000);
-    
-    console.log(`Polygon dimensions: ${(widthMeters/1000).toFixed(1)}km x ${(heightMeters/1000).toFixed(1)}km`);
-    console.log(`Calculated resolution: ${safeResolution}m (limit: 1500m)`);
-    
-    // RESOLUTION-AWARE Statistical API request
+    // Statistical API request with proper resolution handling
     const statsRequest = {
       input: {
         bounds: {
@@ -470,7 +427,7 @@ const ForestBiomassApp = () => {
               from: startDate.toISOString(),
               to: endDate.toISOString()
             },
-            maxCloudCoverage: isWinterMonth ? 0.5 : cloudCoverage / 100,
+            maxCloudCoverage: cloudCoverage / 100,
             mosaickingOrder: "leastCC"
           }
         }]
@@ -481,11 +438,12 @@ const ForestBiomassApp = () => {
           to: endDate.toISOString()
         },
         aggregationInterval: {
-          of: isWinterMonth ? "P42D" : "P28D"
+          of: "P1D" // Single day to avoid resolution multiplication
         },
         evalscript: evalscript,
-        resx: safeResolution,
-        resy: safeResolution
+        // CRITICAL: Set resolution to stay under 1500m limit
+        resx: 100, // 100m resolution
+        resy: 100  // 100m resolution
       },
       calculations: {
         default: {
@@ -499,6 +457,8 @@ const ForestBiomassApp = () => {
         }
       }
     };
+    
+    console.log(`Processing ${dateStr} at 100m resolution`);
     
     let retries = 0;
     const maxRetries = 3;
@@ -520,11 +480,10 @@ const ForestBiomassApp = () => {
         });
         
         if (response.status === 401 && retries < maxRetries - 1) {
-          // Token expired, re-authenticate and retry
           console.log('Statistical API returned 401. Re-authenticating...');
           if (await reauthenticate()) {
             retries++;
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Short delay before retry
+            await new Promise(resolve => setTimeout(resolve, 1000));
             continue;
           } else {
             throw new Error('Failed to re-authenticate');
@@ -546,133 +505,75 @@ const ForestBiomassApp = () => {
           const errorText = await response.text();
           console.error('Error details:', errorText);
           
-          // Try to parse error response
           try {
             const errorData = JSON.parse(errorText);
-            console.error('Parsed error:', errorData);
+            if (errorData.message && errorData.message.includes('meters per pixel exceeds')) {
+              console.error('Resolution limit exceeded. Check aggregation interval and resolution settings.');
+            }
           } catch (e) {
             // Not JSON error response
           }
           
-          return { ndvi: estimateNDVIFromDate(acquisitionDate), isSimulated: true };
+          return null; // Return null for failed requests
         }
         
         const statsData = await response.json();
         
-        // Enhanced response logging
-        console.log(`API Response structure for ${dateStr}:`, {
-          hasData: !!statsData?.data,
-          dataLength: statsData?.data?.length || 0,
-          firstInterval: statsData?.data?.[0]?.interval || null
-        });
-        
-        // WINTER-AWARE: Extract NDVI value from Statistical API response
+        // Extract NDVI value from Statistical API response
         if (statsData && statsData.data && Array.isArray(statsData.data) && statsData.data.length > 0) {
           for (const interval of statsData.data) {
-            if (interval.outputs) {
-              // Log available outputs
-              console.log(`Outputs available:`, Object.keys(interval.outputs));
+            if (interval.outputs && interval.outputs.ndvi) {
+              const ndviOutput = interval.outputs.ndvi;
               
-              if (interval.outputs.ndvi) {
-                const ndviOutput = interval.outputs.ndvi;
+              if (ndviOutput.bands && ndviOutput.bands.B0 && ndviOutput.bands.B0.stats) {
+                const stats = ndviOutput.bands.B0.stats;
                 
-                // Check snow data if available
-                let snowInfo = null;
-                if (interval.outputs.snowMask?.bands?.B0?.stats) {
-                  const snowStats = interval.outputs.snowMask.bands.B0.stats;
-                  const snowRatio = (snowStats.sampleCount - snowStats.noDataCount) > 0 ? 
-                    snowStats.mean : 0;
-                  snowInfo = {
-                    snowCoverage: Math.round(snowRatio * 100),
-                    isSnowDominant: snowRatio > 0.5
-                  };
-                }
+                console.log(`Stats for ${dateStr}:`, {
+                  sampleCount: stats.sampleCount,
+                  noDataCount: stats.noDataCount,
+                  validPixels: stats.sampleCount - stats.noDataCount,
+                  mean: stats.mean,
+                  isWinter: isWinterMonth
+                });
                 
-                // Check if we have valid band data
-                if (ndviOutput.bands && ndviOutput.bands.B0 && ndviOutput.bands.B0.stats) {
-                  const stats = ndviOutput.bands.B0.stats;
+                // Check if we have valid data
+                if (stats.sampleCount > 0 && stats.sampleCount > stats.noDataCount) {
+                  const validPixelRatio = (stats.sampleCount - stats.noDataCount) / stats.sampleCount;
                   
-                  // Enhanced debug logging
-                  console.log(`Stats for ${dateStr} (Winter: ${isWinterMonth}):`, {
-                    sampleCount: stats.sampleCount,
-                    noDataCount: stats.noDataCount,
-                    validPixels: stats.sampleCount - stats.noDataCount,
-                    mean: stats.mean,
-                    min: stats.min,
-                    max: stats.max,
-                    snowInfo: snowInfo,
-                    month: month
-                  });
+                  // More lenient threshold for winter months
+                  const minValidRatio = isWinterMonth ? 0.05 : 0.1;
                   
-                  // Check if we have valid data
-                  if (stats.sampleCount > 0 && stats.sampleCount > stats.noDataCount) {
-                    const validPixelRatio = (stats.sampleCount - stats.noDataCount) / stats.sampleCount;
+                  if (validPixelRatio >= minValidRatio) {
+                    // Use mean if available
+                    let ndviValue = null;
                     
-                    // More lenient threshold for winter months
-                    const minValidRatio = isWinterMonth ? 0.05 : 0.1; // 5% for winter, 10% otherwise
-                    
-                    if (validPixelRatio >= minValidRatio) {
-                      // Use mean if available, otherwise use median
-                      let ndviValue = null;
-                      
-                      if (typeof stats.mean === 'number' && !isNaN(stats.mean)) {
-                        ndviValue = stats.mean;
-                      } else if (stats.percentiles) {
-                        ndviValue = stats.percentiles['50.0'] || 
-                                   stats.percentiles['50'] || 
-                                   stats.percentiles['p50'] ||
-                                   null;
-                      }
-                      
-                      // For winter months with snow, NDVI might be very low but still valid
-                      if (ndviValue !== null && !isNaN(ndviValue)) {
-                        // Accept wider range for winter
-                        const isValidRange = isWinterMonth ? 
-                          (ndviValue >= -1 && ndviValue <= 1) : 
-                          (ndviValue >= -0.5 && ndviValue <= 1);
-                        
-                        if (isValidRange) {
-                          console.log(`SUCCESS: Real NDVI value ${ndviValue} for ${dateStr} (${Math.round(validPixelRatio * 100)}% valid pixels${snowInfo ? `, ${snowInfo.snowCoverage}% snow` : ''})`);
-                          return { 
-                            ndvi: ndviValue, 
-                            isSimulated: false,
-                            isWinter: isWinterMonth,
-                            snowCoverage: snowInfo?.snowCoverage || 0
-                          };
-                        } else {
-                          console.warn(`NDVI value ${ndviValue} out of acceptable range for ${dateStr}`);
-                        }
-                      }
-                    } else {
-                      console.warn(`Insufficient valid pixels for ${dateStr}: only ${Math.round(validPixelRatio * 100)}% valid (min: ${minValidRatio * 100}%)`);
+                    if (typeof stats.mean === 'number' && !isNaN(stats.mean)) {
+                      ndviValue = stats.mean;
+                    } else if (stats.percentiles && stats.percentiles['50.0']) {
+                      ndviValue = stats.percentiles['50.0'];
                     }
-                  } else {
-                    console.warn(`No valid pixels for ${dateStr} - all pixels masked or no data`);
+                    
+                    if (ndviValue !== null && !isNaN(ndviValue)) {
+                      const isValidRange = ndviValue >= -1 && ndviValue <= 1;
+                      
+                      if (isValidRange) {
+                        console.log(`SUCCESS: Real NDVI value ${ndviValue} for ${dateStr}`);
+                        return { 
+                          ndvi: ndviValue, 
+                          isWinter: isWinterMonth,
+                          validPixelRatio: validPixelRatio
+                        };
+                      }
+                    }
                   }
-                } else {
-                  console.warn(`Invalid response structure for ${dateStr} - missing bands.B0.stats`);
                 }
-              } else {
-                console.warn(`No NDVI output in response for ${dateStr}`);
               }
             }
           }
-        } else {
-          console.warn(`Empty or invalid data array in response for ${dateStr}`);
         }
         
-        // For winter months, indicate why simulation is used
-        if (isWinterMonth) {
-          console.warn(`No valid NDVI data for winter date ${dateStr} (Month: ${month}), using seasonal simulation`);
-        } else {
-          console.warn(`No valid NDVI data in response for ${dateStr}, using simulated value`);
-        }
-        
-        return { 
-          ndvi: estimateNDVIFromDate(acquisitionDate), 
-          isSimulated: true,
-          isWinter: isWinterMonth 
-        };
+        console.warn(`No valid NDVI data for ${dateStr}. Skipping.`);
+        return null;
         
       } catch (error) {
         if (error.status === 429) {
@@ -680,26 +581,17 @@ const ForestBiomassApp = () => {
         }
         if (retries >= maxRetries - 1) {
           console.error('NDVI processing error after retries:', error);
-          return { ndvi: estimateNDVIFromDate(acquisitionDate), isSimulated: true };
+          return null;
         }
         retries++;
-        await new Promise(resolve => setTimeout(resolve, 2000 * retries)); // Exponential backoff
+        await new Promise(resolve => setTimeout(resolve, 2000 * retries));
       }
     }
-  };
-  
-  // Fallback NDVI estimation based on date
-  const estimateNDVIFromDate = (date) => {
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    const dayOfYear = (month - 1) * 30 + day;
     
-    // Seasonal NDVI model for temperate forests
-    const seasonalFactor = 0.3 * Math.sin(2 * Math.PI * (dayOfYear - 80) / 365) + 0.5;
-    return Math.max(0, Math.min(1, seasonalFactor));
+    return null;
   };
 
-  // Fetch satellite data main function
+  // Fetch satellite data main function - REAL DATA ONLY
   const fetchSatelliteData = async () => {
     if (selectedForests.length === 0) {
       setError('Draw at least one forest polygon');
@@ -725,13 +617,19 @@ const ForestBiomassApp = () => {
     setError(null);
     setBiomassData([]);
     setProcessingStatus('Searching for Sentinel-2 products...');
+    setApiStats({
+      totalRequests: 0,
+      successfulRequests: 0,
+      emptyResponses: 0,
+      errors: 0
+    });
 
     try {
       const selectedForest = selectedForests[selectedForestIndex];
       const endDate = new Date().toISOString().split('T')[0];
 
-      // Start from 2020 for faster processing (can be changed to 2015 for full archive)
-      const startYear = 2020;
+      // Start from 2023 for demonstration (can be changed to earlier years)
+      const startYear = 2023;
       const endYear = new Date().getFullYear();
       const allProducts = [];
 
@@ -762,11 +660,14 @@ const ForestBiomassApp = () => {
 
       // Process products with rate limiting
       const biomassResults = [];
-      const batchSize = 3; // Reduced batch size for better rate limit handling
-      const baseDelay = 4000; // Increased base delay
-      let simulatedCount = 0;
-      let apiFailures = 0;
-      let successCount = 0;
+      const batchSize = 2; // Reduced batch size
+      const baseDelay = 5000; // Increased delay to 5 seconds
+      let realDataCount = 0;
+      let skippedCount = 0;
+      let totalRequests = 0;
+      let successfulRequests = 0;
+      let emptyResponses = 0;
+      let errors = 0;
 
       for (let i = 0; i < allProducts.length; i += batchSize) {
         const batch = allProducts.slice(i, i + batchSize);
@@ -782,80 +683,76 @@ const ForestBiomassApp = () => {
         for (const product of batch) {
           const date = new Date(product.ContentDate.Start).toISOString().split('T')[0];
 
-          let retries = 0;
-          let ndviResult = null;
-          
-          while (retries < 3 && ndviResult === null) {
-            try {
-              if (retries === 0) {
-                await new Promise(resolve => setTimeout(resolve, baseDelay));
-              } else {
-                const backoffDelay = Math.min(baseDelay * Math.pow(2, retries), 30000);
-                await new Promise(resolve => setTimeout(resolve, backoffDelay));
-              }
+          // Add delay between requests
+          await new Promise(resolve => setTimeout(resolve, baseDelay));
 
-              ndviResult = await processSentinel2NDVI(product, selectedForest);
-              
-              if (!ndviResult.isSimulated) {
-                successCount++;
-                console.log(`SUCCESS: Retrieved real NDVI data for ${date}`);
-              }
-              
-            } catch (error) {
-              if (error.status === 429 && error.retryAfter) {
-                setRateLimitExpiry(Date.now() + error.retryAfter);
-                console.log(`Rate limited. Will retry after ${error.retryAfter}ms`);
-              }
-              retries++;
-              
-              if (retries >= 3) {
-                console.error(`Failed to process product after ${retries} retries`);
-                ndviResult = { ndvi: estimateNDVIFromDate(new Date(product.ContentDate.Start)), isSimulated: true };
-                apiFailures++;
-              }
+          totalRequests++;
+          
+          try {
+            const ndviResult = await processSentinel2NDVI(product, selectedForest);
+            
+            if (ndviResult === null) {
+              skippedCount++;
+              emptyResponses++;
+              console.log(`No data available for ${date}, skipping...`);
+              continue;
+            }
+            
+            successfulRequests++;
+            realDataCount++;
+            
+            // Calculate biomass
+            let biomass = ndviToBiomass(ndviResult.ndvi, selectedForest.type);
+            if (ndviResult.isWinter) {
+              // Winter correction factors
+              const winterCorrection = {
+                pine: 1.2,
+                fir: 1.2,
+                birch: 1.5,
+                aspen: 1.5
+              };
+              biomass *= winterCorrection[selectedForest.type] || 1.3;
+            }
+
+            const cloudCoverAttr = product.Attributes?.find(attr =>
+              attr.Name === 'cloudCover' && attr.ValueType === 'Double'
+            );
+            const cloudCoverValue = cloudCoverAttr ? cloudCoverAttr.Value : 0;
+
+            biomassResults.push({
+              date: date,
+              year: parseInt(date.split('-')[0]),
+              month: parseInt(date.split('-')[1]),
+              ndvi: ndviResult.ndvi,
+              biomass: biomass,
+              productId: product.Id,
+              productName: product.Name,
+              cloudCover: cloudCoverValue,
+              footprint: product.GeoFootprint,
+              isWinter: ndviResult.isWinter || false,
+              validPixelRatio: ndviResult.validPixelRatio || 0
+            });
+            
+          } catch (error) {
+            errors++;
+            if (error.status === 429 && error.retryAfter) {
+              setRateLimitExpiry(Date.now() + error.retryAfter);
+              console.log(`Rate limited. Will retry after ${error.retryAfter}ms`);
+            } else {
+              console.error(`Failed to process product: ${error.message}`);
+              skippedCount++;
             }
           }
-          
-          if (ndviResult.isSimulated) {
-            simulatedCount++;
-          }
-          
-          // Adjust biomass calculation for winter conditions
-          let biomass = ndviToBiomass(ndviResult.ndvi, selectedForest.type);
-          if (ndviResult.isWinter && !ndviResult.isSimulated) {
-            // Winter NDVI values are typically lower due to dormant vegetation
-            // Apply correction factor based on forest type
-            const winterCorrection = {
-              pine: 1.2,    // Evergreen, less affected
-              fir: 1.2,     // Evergreen, less affected
-              birch: 1.5,   // Deciduous, more affected
-              aspen: 1.5    // Deciduous, more affected
-            };
-            biomass *= winterCorrection[selectedForest.type] || 1.3;
-          }
-
-          const cloudCoverAttr = product.Attributes?.find(attr =>
-            attr.Name === 'cloudCover' && attr.ValueType === 'Double'
-          );
-          const cloudCoverValue = cloudCoverAttr ? cloudCoverAttr.Value : 0;
-
-          biomassResults.push({
-            date: date,
-            year: parseInt(date.split('-')[0]),
-            month: parseInt(date.split('-')[1]),
-            ndvi: ndviResult.ndvi,
-            biomass: biomass,
-            productId: product.Id,
-            productName: product.Name,
-            cloudCover: cloudCoverValue,
-            footprint: product.GeoFootprint,
-            isSimulated: ndviResult.isSimulated,
-            isWinter: ndviResult.isWinter || false,
-            snowCoverage: ndviResult.snowCoverage || 0
-          });
         }
 
-        setProcessingStatus(`Processing: ${Math.round((i + batchSize) / allProducts.length * 100)}% complete (${successCount} real, ${simulatedCount} simulated)`);
+        setProcessingStatus(`Processing: ${Math.round((i + batchSize) / allProducts.length * 100)}% complete (${realDataCount} successful, ${skippedCount} skipped)`);
+        
+        setApiStats({
+          totalRequests,
+          successfulRequests,
+          emptyResponses,
+          errors
+        });
       }
 
       // Sort by date
@@ -878,8 +775,7 @@ const ForestBiomassApp = () => {
       });
 
       setBiomassData(biomassResults);
-      setSimulatedDataCount(simulatedCount);
-      setApiFailureCount(apiFailures);
+      setSkippedDataCount(skippedCount);
       setProcessingStatus('');
     } catch (err) {
       setError('Data fetch error: ' + err.message);
@@ -1052,7 +948,7 @@ const ForestBiomassApp = () => {
 
   return (
     <div style={styles.container}>
-      <h1 style={styles.header}>Forest Biomass Analysis - Real Sentinel-2 Data Processing</h1>
+      <h1 style={styles.header}>Forest Biomass Analysis - Real Sentinel-2 Data Only</h1>
 
       {error && (
         <div style={styles.error}>
@@ -1067,7 +963,7 @@ const ForestBiomassApp = () => {
             <li>Token acquired: {new Date().toLocaleTimeString()}</li>
             <li>Token expires: {authRef.current.tokenExpiry ? new Date(authRef.current.tokenExpiry).toLocaleTimeString() : 'Unknown'}</li>
             <li>Time remaining: {authRef.current.tokenExpiry && isTokenValid() ? Math.max(0, Math.floor((authRef.current.tokenExpiry - Date.now()) / 1000)) + ' seconds' : 'Expired'}</li>
-            <li>API endpoint: catalogue.dataspace.copernicus.eu/odata/v1</li>
+            <li>API endpoint: sh.dataspace.copernicus.eu/api/v1/statistics</li>
           </ul>
         </div>
       )}
@@ -1121,7 +1017,6 @@ protocol/openid-connect/token`}
               placeholder="Paste access token if CORS blocked"
               onChange={(e) => {
                 if (e.target.value) {
-                  // Update ref instead of state to avoid stale closures
                   authRef.current.accessToken = e.target.value;
                   authRef.current.tokenExpiry = Date.now() + (540 * 1000); // 9 minutes
                   authRef.current.lastAuthTime = Date.now();
@@ -1226,7 +1121,7 @@ protocol/openid-connect/token`}
         onClick={fetchSatelliteData}
         disabled={loading || selectedForests.length === 0 || !authenticated}
       >
-        {loading ? 'Processing Sentinel-2 Data...' : 'Analyze Sentinel-2 Archive (2020-Present)'}
+        {loading ? 'Processing Sentinel-2 Data...' : 'Analyze Sentinel-2 Archive (2023-Present)'}
       </button>
 
       {selectedForests.length > 0 && (
@@ -1244,7 +1139,7 @@ protocol/openid-connect/token`}
               <h3>Forest #{idx + 1}</h3>
               <p><strong>Type:</strong> {forest.type}</p>
               <p><strong>Area:</strong> {forest.area} hectares</p>
-              <p><strong>Data Source:</strong> Sentinel-2 MSI</p>
+              <p><strong>Data Source:</strong> Sentinel-2 MSI Level-2A</p>
             </div>
           ))}
         </div>
@@ -1254,6 +1149,14 @@ protocol/openid-connect/token`}
         <div style={styles.loading}>
           <p>Processing Sentinel-2 imagery...</p>
           <p style={{ fontSize: '14px', color: '#999' }}>{processingStatus}</p>
+          {apiStats.totalRequests > 0 && (
+            <div style={{ marginTop: '10px', fontSize: '13px' }}>
+              <p>API Requests: {apiStats.totalRequests}</p>
+              <p>Successful: {apiStats.successfulRequests}</p>
+              <p>Empty Responses: {apiStats.emptyResponses}</p>
+              <p>Errors: {apiStats.errors}</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -1261,31 +1164,15 @@ protocol/openid-connect/token`}
         <div style={styles.chartContainer}>
           <h2>Historical Biomass Analysis</h2>
           
-          {simulatedDataCount === 0 ? (
-            <div style={styles.success}>
-              <strong>✅ Success:</strong> All {biomassData.length} data points are from real Sentinel-2 satellite imagery processed through the Statistical API!
-            </div>
-          ) : simulatedDataCount > 0 && (
-            <div style={{
-              backgroundColor: '#fff3cd',
-              color: '#856404',
-              padding: '12px 20px',
-              borderRadius: '4px',
-              marginBottom: '20px',
-              border: '1px solid #ffeaa7',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px'
-            }}>
-              <strong>⚠️ Partial Data Warning:</strong>
-              <span>{simulatedDataCount} of {biomassData.length} data points ({((simulatedDataCount / biomassData.length) * 100).toFixed(1)}%) are using fallback NDVI estimation. Real data: {biomassData.length - simulatedDataCount} points. Simulated values are marked with hollow dots in the chart.</span>
-            </div>
-          )}
+          <div style={styles.success}>
+            <strong>✅ Real Satellite Data Only:</strong> Displaying {biomassData.length} data points from Sentinel-2 imagery. 
+            {skippedDataCount > 0 && ` ${skippedDataCount} dates were skipped due to insufficient valid pixels or processing errors.`}
+          </div>
           
           <p style={{ fontSize: '14px', color: '#666', marginBottom: '20px' }}>
-            NDVI time series from Sentinel-2 MSI (10m resolution for B4/B8).
+            NDVI time series from Sentinel-2 MSI (100m statistical resolution).
             Cloud-filtered scenes with less than {cloudCoverage}% cloud coverage.
-            Processed via Copernicus Data Space Ecosystem Statistical API.
+            Processed via Copernicus Data Space Statistical API.
           </p>
           
           <div style={styles.controls}>
@@ -1344,16 +1231,9 @@ protocol/openid-connect/token`}
                             ❄️ WINTER CONDITIONS
                           </p>
                         )}
-                        {data.isSimulated && (
-                          <p style={{ margin: '2px 0', fontSize: '12px', color: '#ff6b6b', fontWeight: 'bold' }}>
-                            ⚠️ SIMULATED DATA
-                          </p>
-                        )}
-                        {!data.isSimulated && (
-                          <p style={{ margin: '2px 0', fontSize: '12px', color: '#51cf66', fontWeight: 'bold' }}>
-                            ✅ REAL SATELLITE DATA
-                          </p>
-                        )}
+                        <p style={{ margin: '2px 0', fontSize: '12px', color: '#51cf66', fontWeight: 'bold' }}>
+                          ✅ REAL SATELLITE DATA
+                        </p>
                         <p style={{ margin: '2px 0', fontSize: '12px' }}>
                           NDVI: {data.ndvi.toFixed(3)}
                         </p>
@@ -1368,13 +1248,11 @@ protocol/openid-connect/token`}
                         <p style={{ margin: '2px 0', fontSize: '12px', color: '#666' }}>
                           Cloud Cover: {data.cloudCover.toFixed(1)}%
                         </p>
-                        {data.snowCoverage > 0 && (
-                          <p style={{ margin: '2px 0', fontSize: '12px', color: '#0066cc' }}>
-                            Snow Coverage: {data.snowCoverage}%
-                          </p>
-                        )}
+                        <p style={{ margin: '2px 0', fontSize: '12px', color: '#666' }}>
+                          Valid Pixels: {(data.validPixelRatio * 100).toFixed(1)}%
+                        </p>
                         <p style={{ margin: '2px 0', fontSize: '10px', color: '#999' }}>
-                          Source: {data.isSimulated ? 'Seasonal Model' : 'Sentinel-2 Statistical API'}
+                          Source: Sentinel-2 Statistical API
                         </p>
                       </div>
                     );
@@ -1390,19 +1268,7 @@ protocol/openid-connect/token`}
                 stroke="#82ca9d"
                 name="Scene Biomass"
                 strokeWidth={0}
-                dot={(props) => {
-                  const { cx, cy, payload } = props;
-                  return (
-                    <circle
-                      cx={cx}
-                      cy={cy}
-                      r={4}
-                      fill={payload.isSimulated ? 'none' : '#82ca9d'}
-                      stroke="#82ca9d"
-                      strokeWidth={payload.isSimulated ? 2 : 0}
-                    />
-                  );
-                }}
+                dot={{ r: 4, fill: '#82ca9d' }}
               />
               <Line
                 yAxisId="ndvi"
@@ -1411,19 +1277,7 @@ protocol/openid-connect/token`}
                 stroke="#8884d8"
                 name="Scene NDVI"
                 strokeWidth={0}
-                dot={(props) => {
-                  const { cx, cy, payload } = props;
-                  return (
-                    <circle
-                      cx={cx}
-                      cy={cy}
-                      r={4}
-                      fill={payload.isSimulated ? 'none' : '#8884d8'}
-                      stroke="#8884d8"
-                      strokeWidth={payload.isSimulated ? 2 : 0}
-                    />
-                  );
-                }}
+                dot={{ r: 4, fill: '#8884d8' }}
               />
               <Line
                 yAxisId="biomass"
@@ -1440,13 +1294,13 @@ protocol/openid-connect/token`}
           <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
             <h4>Analysis Summary</h4>
             <p style={{ fontSize: '14px', margin: '5px 0' }}>
-              Total Observations: {biomassData.length} cloud-free scenes
+              Total Observations: {biomassData.length} cloud-free scenes with valid data
             </p>
             <p style={{ fontSize: '14px', margin: '5px 0' }}>
-              Real Data (Sentinel-2 API): {biomassData.length - simulatedDataCount} scenes ({((biomassData.length - simulatedDataCount) / biomassData.length * 100).toFixed(1)}%)
+              Data Source: Sentinel-2 Level-2A products via Statistical API
             </p>
             <p style={{ fontSize: '14px', margin: '5px 0' }}>
-              Simulated Data (Fallback): {simulatedDataCount} scenes ({(simulatedDataCount / biomassData.length * 100).toFixed(1)}%)
+              Skipped Scenes: {skippedDataCount} (insufficient valid pixels or API errors)
             </p>
             <p style={{ fontSize: '14px', margin: '5px 0' }}>
               Analysis Period: {biomassData[0]?.year} - {biomassData[biomassData.length - 1]?.year}
@@ -1499,47 +1353,35 @@ protocol/openid-connect/token`}
       )}
 
       <div style={styles.info}>
-        <h4>Technical Implementation - Winter-Aware NDVI Processing</h4>
+        <h4>Technical Implementation Details</h4>
         <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
-          <li><strong>✅ WINTER HANDLING</strong> - Detects winter months (Dec-Mar) with specialized processing</li>
-          <li><strong>✅ SNOW DETECTION</strong> - NDSI (Normalized Difference Snow Index) calculation using (B03-B11)/(B03+B11)</li>
-          <li><strong>✅ ADAPTIVE MASKING</strong> - SCL-based masking adjusted for winter conditions:
+          <li><strong>✅ REAL DATA ONLY</strong> - No simulated or estimated values. Only actual satellite measurements displayed.</li>
+          <li><strong>✅ RESOLUTION FIX</strong> - Fixed resolution to 100m to stay under the 1500m API limit</li>
+          <li><strong>✅ SINGLE DAY AGGREGATION</strong> - Using P1D aggregation interval to avoid resolution multiplication issues</li>
+          <li><strong>✅ WINTER HANDLING</strong> - Adaptive SCL masking for winter months (Dec-Mar)</li>
+          <li><strong>✅ ENHANCED ERROR HANDLING</strong> - Proper handling of empty data arrays and API errors</li>
+          <li><strong>API Configuration:</strong>
             <ul>
-              <li>Summer: Excludes SCL values 0,1,3,8,9,10,11 (clouds, shadows, snow)</li>
-              <li>Winter: Excludes only SCL values 0,1,9 (no-data, saturated, high clouds)</li>
-            </ul>
-          </li>
-          <li><strong>✅ TEMPORAL WINDOW</strong> - Extended to ±21 days for winter, ±14 days for other seasons</li>
-          <li><strong>✅ VALID PIXEL THRESHOLD</strong> - 5% minimum for winter, 10% for other seasons</li>
-          <li><strong>✅ BIOMASS CORRECTION</strong> - Winter correction factors: 1.2x for evergreens, 1.5x for deciduous</li>
-          <li><strong>✅ ENHANCED LOGGING</strong> - Detailed response structure, pixel counts, snow coverage percentage</li>
-          <li><strong>SCL Classification Values:</strong>
-            <ul>
-              <li>0: No Data | 1: Saturated/Defective | 2: Dark Areas</li>
-              <li>3: Cloud Shadows | 4: Vegetation | 5: Bare Soil</li>
-              <li>6: Water | 7: Unclassified | 8: Medium Clouds</li>
-              <li>9: High Clouds | 10: Cirrus | 11: Snow/Ice</li>
-            </ul>
-          </li>
-          <li><strong>API Endpoints:</strong>
-            <ul>
-              <li>Catalog: https://catalogue.dataspace.copernicus.eu/odata/v1/Products</li>
-              <li>Statistical API: https://sh.dataspace.copernicus.eu/api/v1/statistics</li>
+              <li>Statistical API Resolution: 100m x 100m (well under 1500m limit)</li>
+              <li>Aggregation Interval: P1D (single day)</li>
+              <li>Collection: sentinel-2-l2a</li>
+              <li>Mosaicking: leastCC (least cloud coverage)</li>
             </ul>
           </li>
           <li><strong>Processing Details:</strong>
             <ul>
-              <li>NDVI: (B08 - B04) / (B08 + B04) | Range: [-1, 1]</li>
-              <li>NDSI: (B03 - B11) / (B03 + B11) | Snow threshold: bigger 0.4</li>
-              <li>Resolution: 10m (B04/B08) | Cloud coverage: Tile-based metadata</li>
-              <li>Aggregation: P42D (winter) | P28D (other seasons)</li>
+              <li>NDVI Calculation: (B08 - B04) / (B08 + B04)</li>
+              <li>Valid Pixel Threshold: 5% (winter) / 10% (other seasons)</li>
+              <li>Rate Limiting: 5 second delay between requests</li>
+              <li>Batch Size: 2 products per batch</li>
             </ul>
           </li>
-          <li><strong>Finland-Specific Optimizations:</strong>
+          <li><strong>Data Quality:</strong>
             <ul>
-              <li>Winter months: December through March</li>
-              <li>Snow persistence detection via NDSI bands</li>
-              <li>Forest type-specific biomass adjustments</li>
+              <li>Only scenes with sufficient valid pixels included</li>
+              <li>Cloud coverage filter applied at catalog search</li>
+              <li>SCL-based pixel masking in evalscript</li>
+              <li>Winter-aware processing for Finnish conditions</li>
             </ul>
           </li>
         </ul>
