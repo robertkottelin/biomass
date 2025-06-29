@@ -405,10 +405,16 @@ const ForestBiomassApp = () => {
     const coordinates = polygon.coords.map(coord => [coord[1], coord[0]]); // lon, lat
     
     // Create time range for aggregation
-    // Use single day aggregation to avoid resolution issues
-    const startDate = new Date(acquisitionDate);
-    const endDate = new Date(acquisitionDate);
-    endDate.setDate(endDate.getDate() + 1); // Single day window
+    // Expand search window to 7 days to ensure satellite coverage
+    const searchStartDate = new Date(acquisitionDate);
+    searchStartDate.setDate(searchStartDate.getDate() - 3); // 3 days before
+    const searchEndDate = new Date(acquisitionDate);
+    searchEndDate.setDate(searchEndDate.getDate() + 3); // 3 days after
+    
+    // Keep single day aggregation for the specific acquisition date
+    const aggregationStartDate = new Date(acquisitionDate);
+    const aggregationEndDate = new Date(acquisitionDate);
+    aggregationEndDate.setDate(aggregationEndDate.getDate() + 1);
     
     // Statistical API request with proper resolution handling
     const statsRequest = {
@@ -426,8 +432,8 @@ const ForestBiomassApp = () => {
           type: "sentinel-2-l2a",
           dataFilter: {
             timeRange: {
-              from: startDate.toISOString(),
-              to: endDate.toISOString()
+              from: searchStartDate.toISOString(),
+              to: searchEndDate.toISOString()
             },
             maxCloudCoverage: cloudCoverage / 100,
             mosaickingOrder: "leastCC"
@@ -436,8 +442,8 @@ const ForestBiomassApp = () => {
       },
       aggregation: {
         timeRange: {
-          from: startDate.toISOString(),
-          to: endDate.toISOString()
+          from: aggregationStartDate.toISOString(),
+          to: aggregationEndDate.toISOString()
         },
         aggregationInterval: {
           of: "P1D" // Single day to avoid resolution multiplication
@@ -533,7 +539,12 @@ const ForestBiomassApp = () => {
         }
         
         // Extract NDVI value from Statistical API response
-        if (statsData && statsData.data && Array.isArray(statsData.data) && statsData.data.length > 0) {
+        if (statsData && statsData.data && Array.isArray(statsData.data)) {
+          if (statsData.data.length === 0) {
+            console.log(`No data returned for ${dateStr}. Likely no satellite acquisition within search window.`);
+            return null;
+          }
+          
           if (debugMode) {
             console.log(`Found ${statsData.data.length} intervals in response`);
           }
