@@ -305,14 +305,122 @@ const ForestBiomassApp = () => {
     return data.value || [];
   };
 
+  // Check data availability using Catalog API
+  const checkDataAvailability = async (polygon, startDate, endDate, cloudCoverage) => {
+    const coords = polygon.coords.map(coord => [coord[1], coord[0]]);
+    const bbox = [
+      Math.min(...coords.map(c => c[0])),
+      Math.min(...coords.map(c => c[1])),
+      Math.max(...coords.map(c => c[0])),
+      Math.max(...coords.map(c => c[1]))
+    ];
+
+    const catalogRequest = {
+      collections: ["sentinel-2-l2a"],
+      bbox: bbox,
+      datetime: `${startDate.toISOString()}/${endDate.toISOString()}`,
+      filter: `eo:cloud_cover<${cloudCoverage}`,
+      limit: 100
+    };
+
+    const catalogUrl = 'https://services.sentinel-hub.com/api/v1/catalog/1.0.0/search';
+    
+    try {
+      const response = await fetch(catalogUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${getAccessToken()}`
+        },
+        body: JSON.stringify(catalogRequest)
+      });
+
+      if (!response.ok) {
+        console.warn(`Catalog API error: ${response.status}`);
+        return [];
+      }
+
+      const data = await response.json();
+      return data.features || [];
+    } catch (error) {
+      console.warn('Catalog API request failed:', error);
+      return [];
+    }
+  };
+
   // Process Sentinel-2 NDVI data using Sentinel Hub Statistical API - REAL DATA ONLY
   const processSentinel2NDVI = async (product, polygon, cloudCoverage, debugMode = false) => {
     const acquisitionDate = new Date(product.ContentDate.Start);
     const dateStr = acquisitionDate.toISOString().split('T')[0];
-    const month = acquisitionDate.getMonth() + 1; // 1-12
+    const month = acquisitionDate.getMonth() + 1;
     
     // Detect winter months (December-March) for Finland
     const isWinterMonth = month === 12 || month === 1 || month === 2 || month === 3;
+    
+    // Progressive search window expansion
+    const searchWindows = [7, 14, 21, 30]; // Days
+    const cloudCoverageSteps = [cloudCoverage, 50, 70, 90]; // Progressive relaxation
+    let availableAcquisitions = [];
+    let actualCloudCoverage = cloudCoverage;
+    let searchWindowUsed = 0;
+    
+    // Try different combinations of search window and cloud coverage
+    searchLoop: for (const windowDays of searchWindows) {
+      for (const maxCloudCoverage of cloudCoverageSteps) {
+        if (maxCloudCoverage < cloudCoverage) continue;
+        
+        const searchStartDate = new Date(acquisitionDate);
+        searchStartDate.setDate(searchStartDate.getDate() - Math.floor(windowDays / 2));
+        const searchEndDate = new Date(acquisitionDate);
+        searchEndDate.setDate(searchEndDate.getDate() + Math.floor(windowDays / 2));
+        
+        if (debugMode) {
+          console.log(`Checking availability: ${windowDays}-day window, ${maxCloudCoverage}% cloud coverage`);
+        }
+        
+        availableAcquisitions = await checkDataAvailability(
+          polygon, 
+          searchStartDate, 
+          searchEndDate, 
+          maxCloudCoverage
+        );
+        
+        if (availableAcquisitions.length > 0) {
+          actualCloudCoverage = maxCloudCoverage;
+          searchWindowUsed = windowDays;
+          console.log(`Found ${availableAcquisitions.length} acquisitions with ${windowDays}-day window and ${maxCloudCoverage}% cloud coverage`);
+          break searchLoop;
+        }
+      }
+    }
+    
+    if (availableAcquisitions.length === 0) {
+      console.log(`No acquisitions found for ${dateStr} even with 30-day window and 90% cloud coverage`);
+      return null;
+    }
+    
+    // Find closest acquisition to target date
+    const closestAcquisition = availableAcquisitions.reduce((prev, curr) => {
+      const prevDiff = Math.abs(new Date(prev.properties.datetime) - acquisitionDate);
+      const currDiff = Math.abs(new Date(curr.properties.datetime) - acquisitionDate);
+      return currDiff < prevDiff ? curr : prev;
+    });
+    
+    const actualAcquisitionDate = new Date(closestAcquisition.properties.datetime);
+    const dayOffset = Math.round(Math.abs(actualAcquisitionDate - acquisitionDate) / (1000 * 60 * 60 * 24));
+    
+    console.log(`Using acquisition from ${actualAcquisitionDate.toISOString().split('T')[0]} (${dayOffset} days offset, ${closestAcquisition.properties['eo:cloud_cover']?.toFixed(1)}% cloud cover)`);
+    
+    // Use the actual acquisition date for the Statistical API request
+    const searchStartDate = new Date(actualAcquisitionDate);
+    searchStartDate.setDate(searchStartDate.getDate() - 1);
+    const searchEndDate = new Date(actualAcquisitionDate);
+    searchEndDate.setDate(searchEndDate.getDate() + 1);
+    
+    // Keep aggregation for the specific acquisition date
+    const aggregationStartDate = new Date(actualAcquisitionDate);
+    const aggregationEndDate = new Date(actualAcquisitionDate);
+    aggregationEndDate.setDate(aggregationEndDate.getDate() + 1);
     
     // ENHANCED evalscript with correct output configuration
     const evalscript = `
@@ -435,7 +543,7 @@ const ForestBiomassApp = () => {
               from: searchStartDate.toISOString(),
               to: searchEndDate.toISOString()
             },
-            maxCloudCoverage: cloudCoverage / 100,
+            maxCloudCoverage: actualCloudCoverage / 100,
             mosaickingOrder: "leastCC"
           }
         }]
@@ -466,7 +574,7 @@ const ForestBiomassApp = () => {
       }
     };
     
-    console.log(`Processing ${dateStr} at 100m resolution`);
+    console.log(`Processing ${actualAcquisitionDate.toISOString().split('T')[0]} (originally requested ${dateStr}) at 100m resolution`);
     if (debugMode) {
       console.log('Stats Request:', JSON.stringify(statsRequest, null, 2));
     }
@@ -718,6 +826,22 @@ const ForestBiomassApp = () => {
       const startYear = 2023;
       const endYear = new Date().getFullYear();
       const allProducts = [];
+
+      // First, check overall data availability for the area
+      console.log('Checking overall data availability for the selected area...');
+      const overallCheck = await checkDataAvailability(
+        selectedForest,
+        new Date(`${startYear}-01-01`),
+        new Date(),
+        90 // Max cloud coverage for availability check
+      );
+      
+      if (overallCheck.length === 0) {
+        setError('No Sentinel-2 data available for this area. Please select a different location.');
+        return;
+      }
+      
+      console.log(`Found ${overallCheck.length} total acquisitions for the area since ${startYear}`);
 
       for (let year = startYear; year <= endYear; year++) {
         const yearStart = `${year}-01-01`;
