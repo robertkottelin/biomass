@@ -412,15 +412,15 @@ const ForestBiomassApp = () => {
     console.log(`Using acquisition from ${actualAcquisitionDate.toISOString().split('T')[0]} (${dayOffset} days offset, ${closestAcquisition.properties['eo:cloud_cover']?.toFixed(1)}% cloud cover)`);
     
     // Use the actual acquisition date for the Statistical API request
-    const searchStartDate = new Date(actualAcquisitionDate);
-    searchStartDate.setDate(searchStartDate.getDate() - 1);
-    const searchEndDate = new Date(actualAcquisitionDate);
-    searchEndDate.setDate(searchEndDate.getDate() + 1);
+    const statsSearchStartDate = new Date(actualAcquisitionDate);
+    statsSearchStartDate.setDate(statsSearchStartDate.getDate() - 1);
+    const statsSearchEndDate = new Date(actualAcquisitionDate);
+    statsSearchEndDate.setDate(statsSearchEndDate.getDate() + 1);
     
     // Keep aggregation for the specific acquisition date
-    const aggregationStartDate = new Date(actualAcquisitionDate);
-    const aggregationEndDate = new Date(actualAcquisitionDate);
-    aggregationEndDate.setDate(aggregationEndDate.getDate() + 1);
+    const statsAggregationStartDate = new Date(actualAcquisitionDate);
+    const statsAggregationEndDate = new Date(actualAcquisitionDate);
+    statsAggregationEndDate.setDate(statsAggregationEndDate.getDate() + 1);
     
     // ENHANCED evalscript with correct output configuration
     const evalscript = `
