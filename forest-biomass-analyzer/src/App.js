@@ -46,14 +46,14 @@ const DrawControl = ({ onCreated, onDeleted }) => {
           remove: true
         },
         draw: {
-          polygon: {
-            allowIntersection: false,
-            showArea: true,
-            drawError: {
-              color: '#b00b00',
-              timeout: 1000
-            }
-          },
+        polygon: {
+          allowIntersection: false,
+          showArea: true,
+          drawError: {
+            color: '#b00b00',
+            timeout: 1000
+          }
+        },
           rectangle: false,
           circle: false,
           circlemarker: false,
@@ -305,49 +305,6 @@ const ForestBiomassApp = () => {
     return data.value || [];
   };
 
-  // Check data availability using Catalog API
-  const checkDataAvailability = async (polygon, startDate, endDate, cloudCoverage) => {
-    const coords = polygon.coords.map(coord => [coord[1], coord[0]]);
-    const bbox = [
-      Math.min(...coords.map(c => c[0])),
-      Math.min(...coords.map(c => c[1])),
-      Math.max(...coords.map(c => c[0])),
-      Math.max(...coords.map(c => c[1]))
-    ];
-
-    const catalogRequest = {
-      collections: ["sentinel-2-l2a"],
-      bbox: bbox,
-      datetime: `${startDate.toISOString()}/${endDate.toISOString()}`,
-      filter: `eo:cloud_cover<${cloudCoverage}`,
-      limit: 100
-    };
-
-    const catalogUrl = 'https://services.sentinel-hub.com/api/v1/catalog/1.0.0/search';
-    
-    try {
-      const response = await fetch(catalogUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${getAccessToken()}`
-        },
-        body: JSON.stringify(catalogRequest)
-      });
-
-      if (!response.ok) {
-        console.warn(`Catalog API error: ${response.status}`);
-        return [];
-      }
-
-      const data = await response.json();
-      return data.features || [];
-    } catch (error) {
-      console.warn('Catalog API request failed:', error);
-      return [];
-    }
-  };
-
   // Process Sentinel-2 NDVI data using Sentinel Hub Statistical API - REAL DATA ONLY
   const processSentinel2NDVI = async (product, polygon, cloudCoverage, debugMode = false) => {
     const acquisitionDate = new Date(product.ContentDate.Start);
@@ -357,70 +314,27 @@ const ForestBiomassApp = () => {
     // Detect winter months (December-March) for Finland
     const isWinterMonth = month === 12 || month === 1 || month === 2 || month === 3;
     
-    // Progressive search window expansion
-    const searchWindows = [7, 14, 21, 30]; // Days
-    const cloudCoverageSteps = [cloudCoverage, 50, 70, 90]; // Progressive relaxation
-    let availableAcquisitions = [];
-    let actualCloudCoverage = cloudCoverage;
-    let searchWindowUsed = 0;
+    // Try different cloud coverage thresholds if no data found
+    const cloudCoverageSteps = [cloudCoverage, 50, 70, 90];
     
-    // Try different combinations of search window and cloud coverage
-    searchLoop: for (const windowDays of searchWindows) {
-      for (const maxCloudCoverage of cloudCoverageSteps) {
-        if (maxCloudCoverage < cloudCoverage) continue;
-        
-        const searchStartDate = new Date(acquisitionDate);
-        searchStartDate.setDate(searchStartDate.getDate() - Math.floor(windowDays / 2));
-        const searchEndDate = new Date(acquisitionDate);
-        searchEndDate.setDate(searchEndDate.getDate() + Math.floor(windowDays / 2));
-        
-        if (debugMode) {
-          console.log(`Checking availability: ${windowDays}-day window, ${maxCloudCoverage}% cloud coverage`);
-        }
-        
-        availableAcquisitions = await checkDataAvailability(
-          polygon, 
-          searchStartDate, 
-          searchEndDate, 
-          maxCloudCoverage
-        );
-        
-        if (availableAcquisitions.length > 0) {
-          actualCloudCoverage = maxCloudCoverage;
-          searchWindowUsed = windowDays;
-          console.log(`Found ${availableAcquisitions.length} acquisitions with ${windowDays}-day window and ${maxCloudCoverage}% cloud coverage`);
-          break searchLoop;
-        }
+    for (const maxCloudCoverage of cloudCoverageSteps) {
+      if (maxCloudCoverage < cloudCoverage) continue;
+      
+      // Create wider time range for better data availability
+      const widerSearchStartDate = new Date(acquisitionDate);
+      widerSearchStartDate.setDate(widerSearchStartDate.getDate() - 7); // 7 days before
+      const widerSearchEndDate = new Date(acquisitionDate);
+      widerSearchEndDate.setDate(widerSearchEndDate.getDate() + 7); // 7 days after
+      
+      // Keep aggregation interval wider to capture more data
+      const widerAggregationStartDate = new Date(acquisitionDate);
+      widerAggregationStartDate.setDate(widerAggregationStartDate.getDate() - 7);
+      const widerAggregationEndDate = new Date(acquisitionDate);
+      widerAggregationEndDate.setDate(widerAggregationEndDate.getDate() + 7);
+      
+      if (debugMode || maxCloudCoverage > cloudCoverage) {
+        console.log(`Trying with ${maxCloudCoverage}% cloud coverage for ${dateStr}`);
       }
-    }
-    
-    if (availableAcquisitions.length === 0) {
-      console.log(`No acquisitions found for ${dateStr} even with 30-day window and 90% cloud coverage`);
-      return null;
-    }
-    
-    // Find closest acquisition to target date
-    const closestAcquisition = availableAcquisitions.reduce((prev, curr) => {
-      const prevDiff = Math.abs(new Date(prev.properties.datetime) - acquisitionDate);
-      const currDiff = Math.abs(new Date(curr.properties.datetime) - acquisitionDate);
-      return currDiff < prevDiff ? curr : prev;
-    });
-    
-    const actualAcquisitionDate = new Date(closestAcquisition.properties.datetime);
-    const dayOffset = Math.round(Math.abs(actualAcquisitionDate - acquisitionDate) / (1000 * 60 * 60 * 24));
-    
-    console.log(`Using acquisition from ${actualAcquisitionDate.toISOString().split('T')[0]} (${dayOffset} days offset, ${closestAcquisition.properties['eo:cloud_cover']?.toFixed(1)}% cloud cover)`);
-    
-    // Use the actual acquisition date for the Statistical API request
-    const statsSearchStartDate = new Date(actualAcquisitionDate);
-    statsSearchStartDate.setDate(statsSearchStartDate.getDate() - 1);
-    const statsSearchEndDate = new Date(actualAcquisitionDate);
-    statsSearchEndDate.setDate(statsSearchEndDate.getDate() + 1);
-    
-    // Keep aggregation for the specific acquisition date
-    const statsAggregationStartDate = new Date(actualAcquisitionDate);
-    const statsAggregationEndDate = new Date(actualAcquisitionDate);
-    statsAggregationEndDate.setDate(statsAggregationEndDate.getDate() + 1);
     
     // ENHANCED evalscript with correct output configuration
     const evalscript = `
@@ -574,7 +488,7 @@ const ForestBiomassApp = () => {
       }
     };
     
-    console.log(`Processing ${actualAcquisitionDate.toISOString().split('T')[0]} (originally requested ${dateStr}) at 100m resolution`);
+    console.log(`Processing ${dateStr} with 14-day window at 100m resolution`);
     if (debugMode) {
       console.log('Stats Request:', JSON.stringify(statsRequest, null, 2));
     }
@@ -633,7 +547,7 @@ const ForestBiomassApp = () => {
             // Not JSON error response
           }
           
-          return null; // Return null for failed requests
+          break; // Exit retry loop for this cloud coverage threshold
         }
         
         const statsData = await response.json();
@@ -646,16 +560,14 @@ const ForestBiomassApp = () => {
           console.log('Full response:', JSON.stringify(statsData, null, 2));
         }
         
-        // Extract NDVI value from Statistical API response
-        if (statsData && statsData.data && Array.isArray(statsData.data)) {
-          if (statsData.data.length === 0) {
-            console.log(`No data returned for ${dateStr}. Likely no satellite acquisition within search window.`);
-            return null;
-          }
-          
+        // Check if we got any data
+        if (statsData && statsData.data && Array.isArray(statsData.data) && statsData.data.length > 0) {
+          // Process the data as before
           if (debugMode) {
             console.log(`Found ${statsData.data.length} intervals in response`);
           }
+          
+          for (let i = 0; i < statsData.data.length; i++) {
           
           for (let i = 0; i < statsData.data.length; i++) {
             const interval = statsData.data[i];
@@ -731,7 +643,7 @@ const ForestBiomassApp = () => {
                           const isValidRange = ndviValue >= -1 && ndviValue <= 1;
                           
                           if (isValidRange) {
-                            console.log(`SUCCESS: Real NDVI value ${ndviValue} for ${dateStr}`);
+                            console.log(`SUCCESS: Real NDVI value ${ndviValue} for ${dateStr} (cloud coverage: ${maxCloudCoverage}%)`);
                             return { 
                               ndvi: ndviValue, 
                               isWinter: isWinterMonth,
@@ -761,13 +673,18 @@ const ForestBiomassApp = () => {
             } else if (debugMode) {
               console.log('No outputs found in interval');
             }
+          } // End processing intervals loop
           }
-        } else if (debugMode) {
-          console.log('Invalid response structure - no data array');
+          
+          // Successfully got data, break out of retry loop
+          break;
+        } else {
+          // No data found with current cloud coverage, try next threshold
+          if (debugMode || maxCloudCoverage === cloudCoverage) {
+            console.log(`No data returned for ${dateStr} with ${maxCloudCoverage}% cloud coverage. ${maxCloudCoverage < 90 ? 'Trying higher threshold...' : 'No more thresholds to try.'}`);
+          }
+          break; // Exit retry loop to try next cloud coverage
         }
-        
-        console.warn(`No valid NDVI data for ${dateStr}. Skipping.`);
-        return null;
         
       } catch (error) {
         if (error.status === 429) {
@@ -775,13 +692,16 @@ const ForestBiomassApp = () => {
         }
         if (retries >= maxRetries - 1) {
           console.error('NDVI processing error after retries:', error);
-          return null;
+          break; // Exit retry loop to try next cloud coverage
         }
         retries++;
         await new Promise(resolve => setTimeout(resolve, 2000 * retries));
       }
-    }
+    } // End retry loop
+    } // End cloud coverage loop
     
+    // If we've tried all cloud coverage thresholds and still no data
+    console.warn(`No valid NDVI data for ${dateStr} even with relaxed cloud coverage up to 90%. Skipping.`);
     return null;
   };
 
@@ -826,22 +746,6 @@ const ForestBiomassApp = () => {
       const startYear = 2023;
       const endYear = new Date().getFullYear();
       const allProducts = [];
-
-      // First, check overall data availability for the area
-      console.log('Checking overall data availability for the selected area...');
-      const overallCheck = await checkDataAvailability(
-        selectedForest,
-        new Date(`${startYear}-01-01`),
-        new Date(),
-        90 // Max cloud coverage for availability check
-      );
-      
-      if (overallCheck.length === 0) {
-        setError('No Sentinel-2 data available for this area. Please select a different location.');
-        return;
-      }
-      
-      console.log(`Found ${overallCheck.length} total acquisitions for the area since ${startYear}`);
 
       for (let year = startYear; year <= endYear; year++) {
         const yearStart = `${year}-01-01`;
@@ -1159,6 +1063,16 @@ const ForestBiomassApp = () => {
   return (
     <div style={styles.container}>
       <h1 style={styles.header}>Forest Biomass Analysis - Real Sentinel-2 Data Only</h1>
+      
+      <div style={styles.info}>
+        <strong>Important:</strong> This application uses real Sentinel-2 satellite data. Data availability depends on:
+        <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
+          <li>Satellite revisit frequency (5 days at equator, 2-3 days at higher latitudes)</li>
+          <li>Cloud coverage (especially challenging in winter months)</li>
+          <li>Valid pixels after atmospheric correction and quality masking</li>
+        </ul>
+        Some dates may have no data available due to these constraints.
+      </div>
 
       {error && (
         <div style={styles.error}>
