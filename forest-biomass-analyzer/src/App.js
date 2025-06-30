@@ -53,6 +53,13 @@ const DrawControl = ({ onCreated, onDeleted }) => {
               color: '#b00b00',
               timeout: 1000
             }
+          
+          // No valid data found in any interval, but response was successful
+          // Continue to next cloud coverage threshold
+          if (debugMode) {
+            console.log(`No valid NDVI data found in response for ${dateStr}`);
+          }
+        }
           },
           rectangle: false,
           circle: false,
