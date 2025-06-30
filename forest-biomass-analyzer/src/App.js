@@ -46,14 +46,14 @@ const DrawControl = ({ onCreated, onDeleted }) => {
           remove: true
         },
         draw: {
-        polygon: {
-          allowIntersection: false,
-          showArea: true,
-          drawError: {
-            color: '#b00b00',
-            timeout: 1000
-          }
-        },
+          polygon: {
+            allowIntersection: false,
+            showArea: true,
+            drawError: {
+              color: '#b00b00',
+              timeout: 1000
+            }
+          },
           rectangle: false,
           circle: false,
           circlemarker: false,
@@ -321,23 +321,23 @@ const ForestBiomassApp = () => {
       if (maxCloudCoverage < cloudCoverage) continue;
       
       // Create wider time range for better data availability
-      const widerSearchStartDate = new Date(acquisitionDate);
-      widerSearchStartDate.setDate(widerSearchStartDate.getDate() - 7); // 7 days before
-      const widerSearchEndDate = new Date(acquisitionDate);
-      widerSearchEndDate.setDate(widerSearchEndDate.getDate() + 7); // 7 days after
+      const currentSearchStartDate = new Date(acquisitionDate);
+      currentSearchStartDate.setDate(currentSearchStartDate.getDate() - 7); // 7 days before
+      const currentSearchEndDate = new Date(acquisitionDate);
+      currentSearchEndDate.setDate(currentSearchEndDate.getDate() + 7); // 7 days after
       
       // Keep aggregation interval wider to capture more data
-      const widerAggregationStartDate = new Date(acquisitionDate);
-      widerAggregationStartDate.setDate(widerAggregationStartDate.getDate() - 7);
-      const widerAggregationEndDate = new Date(acquisitionDate);
-      widerAggregationEndDate.setDate(widerAggregationEndDate.getDate() + 7);
+      const currentAggregationStartDate = new Date(acquisitionDate);
+      currentAggregationStartDate.setDate(currentAggregationStartDate.getDate() - 7);
+      const currentAggregationEndDate = new Date(acquisitionDate);
+      currentAggregationEndDate.setDate(currentAggregationEndDate.getDate() + 7);
       
       if (debugMode || maxCloudCoverage > cloudCoverage) {
         console.log(`Trying with ${maxCloudCoverage}% cloud coverage for ${dateStr}`);
       }
     
-    // ENHANCED evalscript with correct output configuration
-    const evalscript = `
+      // ENHANCED evalscript with correct output configuration
+      const evalscript = `
       //VERSION=3
       function setup() {
         return {
@@ -454,8 +454,8 @@ const ForestBiomassApp = () => {
           type: "sentinel-2-l2a",
           dataFilter: {
             timeRange: {
-              from: searchStartDate.toISOString(),
-              to: searchEndDate.toISOString()
+              from: currentSearchStartDate.toISOString(),
+              to: currentSearchEndDate.toISOString()
             },
             maxCloudCoverage: actualCloudCoverage / 100,
             mosaickingOrder: "leastCC"
@@ -464,8 +464,8 @@ const ForestBiomassApp = () => {
       },
       aggregation: {
         timeRange: {
-          from: aggregationStartDate.toISOString(),
-          to: aggregationEndDate.toISOString()
+          from: currentAggregationStartDate.toISOString(),
+          to: currentAggregationEndDate.toISOString()
         },
         aggregationInterval: {
           of: "P1D" // Single day to avoid resolution multiplication
@@ -488,15 +488,15 @@ const ForestBiomassApp = () => {
       }
     };
     
-    console.log(`Processing ${dateStr} with 14-day window at 100m resolution`);
-    if (debugMode) {
-      console.log('Stats Request:', JSON.stringify(statsRequest, null, 2));
-    }
-    
-    let retries = 0;
-    const maxRetries = 3;
-    
-    while (retries < maxRetries) {
+      console.log(`Processing ${dateStr} with 14-day window at 100m resolution`);
+      if (debugMode) {
+        console.log('Stats Request:', JSON.stringify(statsRequest, null, 2));
+      }
+      
+      let retries = 0;
+      const maxRetries = 3;
+      
+      while (retries < maxRetries) {
       try {
         // Ensure valid token before API call
         if (!isTokenValid() && !(await reauthenticate())) {
