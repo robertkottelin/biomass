@@ -110,7 +110,7 @@ const ForestBiomassApp = () => {
   const [trendStartDate, setTrendStartDate] = useState('');
   const [trendEndDate, setTrendEndDate] = useState('');
   const [skippedDataCount, setSkippedDataCount] = useState(0);
-  const [debugMode, setDebugMode] = useState(true); // Enable debug logging
+  const [debugMode, setDebugMode] = useState(true);
   const [apiStats, setApiStats] = useState({
     totalRequests: 0,
     successfulRequests: 0,
@@ -320,17 +320,11 @@ const ForestBiomassApp = () => {
     for (const maxCloudCoverage of cloudCoverageSteps) {
       if (maxCloudCoverage < cloudCoverage) continue;
       
-      // Create wider time range for better data availability
-      const currentSearchStartDate = new Date(acquisitionDate);
-      currentSearchStartDate.setDate(currentSearchStartDate.getDate() - 7); // 7 days before
-      const currentSearchEndDate = new Date(acquisitionDate);
-      currentSearchEndDate.setDate(currentSearchEndDate.getDate() + 7); // 7 days after
-      
-      // Keep aggregation interval wider to capture more data
-      const currentAggregationStartDate = new Date(acquisitionDate);
-      currentAggregationStartDate.setDate(currentAggregationStartDate.getDate() - 7);
-      const currentAggregationEndDate = new Date(acquisitionDate);
-      currentAggregationEndDate.setDate(currentAggregationEndDate.getDate() + 7);
+      // CRITICAL FIX: Use exact acquisition date only for both search and aggregation
+      // This prevents resolution multiplication issues
+      const searchStartDate = new Date(acquisitionDate);
+      const searchEndDate = new Date(acquisitionDate);
+      searchEndDate.setDate(searchEndDate.getDate() + 1); // Next day to create valid range
       
       if (debugMode || maxCloudCoverage > cloudCoverage) {
         console.log(`Trying with ${maxCloudCoverage}% cloud coverage for ${dateStr}`);
@@ -426,19 +420,7 @@ const ForestBiomassApp = () => {
     
     const coordinates = polygon.coords.map(coord => [coord[1], coord[0]]); // lon, lat
     
-    // Create time range for aggregation
-    // Expand search window to 7 days to ensure satellite coverage
-    const searchStartDate = new Date(acquisitionDate);
-    searchStartDate.setDate(searchStartDate.getDate() - 3); // 3 days before
-    const searchEndDate = new Date(acquisitionDate);
-    searchEndDate.setDate(searchEndDate.getDate() + 3); // 3 days after
-    
-    // Keep single day aggregation for the specific acquisition date
-    const aggregationStartDate = new Date(acquisitionDate);
-    const aggregationEndDate = new Date(acquisitionDate);
-    aggregationEndDate.setDate(aggregationEndDate.getDate() + 1);
-    
-    // Statistical API request with proper resolution handling
+    // Statistical API request with FIXED resolution handling
     const statsRequest = {
       input: {
         bounds: {
@@ -454,8 +436,8 @@ const ForestBiomassApp = () => {
           type: "sentinel-2-l2a",
           dataFilter: {
             timeRange: {
-              from: currentSearchStartDate.toISOString(),
-              to: currentSearchEndDate.toISOString()
+              from: searchStartDate.toISOString(),
+              to: searchEndDate.toISOString()
             },
             maxCloudCoverage: maxCloudCoverage / 100,
             mosaickingOrder: "leastCC"
@@ -464,16 +446,16 @@ const ForestBiomassApp = () => {
       },
       aggregation: {
         timeRange: {
-          from: currentAggregationStartDate.toISOString(),
-          to: currentAggregationEndDate.toISOString()
+          from: searchStartDate.toISOString(),
+          to: searchEndDate.toISOString()
         },
         aggregationInterval: {
-          of: "P1D" // Single day to avoid resolution multiplication
+          of: "P1D" // Single day aggregation
         },
         evalscript: evalscript,
-        // CRITICAL: Set resolution to stay under 1500m limit
-        resx: 100, // 100m resolution
-        resy: 100  // 100m resolution
+        // CRITICAL: Higher resolution to prevent limit issues
+        resx: 20, // 20m resolution - native Sentinel-2 resolution
+        resy: 20  // 20m resolution - native Sentinel-2 resolution
       },
       calculations: {
         ndvi: {
@@ -488,16 +470,25 @@ const ForestBiomassApp = () => {
       }
     };
     
-      console.log(`Processing ${dateStr} with 14-day window at 100m resolution`);
+      console.log(`Processing ${dateStr} with single day window at 20m resolution`);
       if (debugMode) {
         console.log('Stats Request:', JSON.stringify(statsRequest, null, 2));
       }
       
       let retries = 0;
       const maxRetries = 3;
+      let baseDelay = 1000;
       
       while (retries < maxRetries) {
       try {
+        // Check rate limit before making request
+        const now = Date.now();
+        if (rateLimitExpiry > now) {
+          const waitTime = rateLimitExpiry - now;
+          console.log(`Rate limited. Waiting ${Math.ceil(waitTime / 1000)}s...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+        
         // Ensure valid token before API call
         if (!isTokenValid() && !(await reauthenticate())) {
           throw new Error('Failed to obtain valid token');
@@ -516,7 +507,7 @@ const ForestBiomassApp = () => {
           console.log('Statistical API returned 401. Re-authenticating...');
           if (await reauthenticate()) {
             retries++;
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => setTimeout(resolve, baseDelay * retries));
             continue;
           } else {
             throw new Error('Failed to re-authenticate');
@@ -525,7 +516,10 @@ const ForestBiomassApp = () => {
         
         if (response.status === 429) {
           const retryAfterHeader = response.headers.get('retry-after');
-          const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader) * 1000 : 10000;
+          const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader) * 1000 : 60000;
+          
+          setRateLimitExpiry(Date.now() + retryAfterMs);
+          console.log(`Rate limit hit. Retry after ${retryAfterMs}ms`);
           
           const error = new Error('Rate limit exceeded');
           error.status = 429;
@@ -541,7 +535,13 @@ const ForestBiomassApp = () => {
           try {
             const errorData = JSON.parse(errorText);
             if (errorData.message && errorData.message.includes('meters per pixel exceeds')) {
-              console.error('Resolution limit exceeded. Check aggregation interval and resolution settings.');
+              console.error('Resolution limit exceeded. This should not happen with 20m resolution.');
+              // Try with even higher resolution as fallback
+              console.log('Retrying with 10m resolution...');
+              statsRequest.aggregation.resx = 10;
+              statsRequest.aggregation.resy = 10;
+              retries++;
+              continue;
             }
           } catch (e) {
             // Not JSON error response
@@ -566,8 +566,6 @@ const ForestBiomassApp = () => {
           if (debugMode) {
             console.log(`Found ${statsData.data.length} intervals in response`);
           }
-          
-          for (let i = 0; i < statsData.data.length; i++) {
           
           for (let i = 0; i < statsData.data.length; i++) {
             const interval = statsData.data[i];
@@ -674,7 +672,6 @@ const ForestBiomassApp = () => {
               console.log('No outputs found in interval');
             }
           } // End processing intervals loop
-          }
           
           // Successfully got data, break out of retry loop
           break;
@@ -688,14 +685,15 @@ const ForestBiomassApp = () => {
         
       } catch (error) {
         if (error.status === 429) {
-          throw error; // Re-throw rate limit errors
+          throw error; // Re-throw rate limit errors to be handled by caller
         }
         if (retries >= maxRetries - 1) {
           console.error('NDVI processing error after retries:', error);
           break; // Exit retry loop to try next cloud coverage
         }
         retries++;
-        await new Promise(resolve => setTimeout(resolve, 2000 * retries));
+        baseDelay *= 2; // Exponential backoff
+        await new Promise(resolve => setTimeout(resolve, baseDelay));
       }
     } // End retry loop
     } // End cloud coverage loop
@@ -774,8 +772,8 @@ const ForestBiomassApp = () => {
 
       // Process products with rate limiting
       const biomassResults = [];
-      const batchSize = 2; // Reduced batch size
-      const baseDelay = 5000; // Increased delay to 5 seconds
+      const batchSize = 1; // Process one at a time to avoid rate limits
+      const minDelay = 10000; // Minimum 10 seconds between requests
       let realDataCount = 0;
       let skippedCount = 0;
       let totalRequests = 0;
@@ -786,24 +784,16 @@ const ForestBiomassApp = () => {
       for (let i = 0; i < allProducts.length; i += batchSize) {
         const batch = allProducts.slice(i, i + batchSize);
 
-        // Check rate limit
-        const now = Date.now();
-        if (rateLimitExpiry > now) {
-          const waitTime = rateLimitExpiry - now;
-          setProcessingStatus(`Rate limited. Waiting ${Math.ceil(waitTime / 1000)}s...`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-        }
-
         for (const product of batch) {
           const date = new Date(product.ContentDate.Start).toISOString().split('T')[0];
 
-          // Add delay between requests
-          await new Promise(resolve => setTimeout(resolve, baseDelay));
+          // Add delay between requests with exponential backoff on errors
+          await new Promise(resolve => setTimeout(resolve, minDelay));
 
           totalRequests++;
           
           try {
-                          const ndviResult = await processSentinel2NDVI(product, selectedForest, cloudCoverage, debugMode);
+            const ndviResult = await processSentinel2NDVI(product, selectedForest, cloudCoverage, debugMode);
             
             if (ndviResult === null) {
               skippedCount++;
@@ -852,6 +842,8 @@ const ForestBiomassApp = () => {
             if (error.status === 429 && error.retryAfter) {
               setRateLimitExpiry(Date.now() + error.retryAfter);
               console.log(`Rate limited. Will retry after ${error.retryAfter}ms`);
+              // Wait for rate limit to expire
+              await new Promise(resolve => setTimeout(resolve, error.retryAfter));
             } else {
               console.error(`Failed to process product: ${error.message}`);
               skippedCount++;
@@ -1057,6 +1049,14 @@ const ForestBiomassApp = () => {
       borderRadius: '4px',
       marginBottom: '20px',
       border: '1px solid #bee5eb'
+    },
+    warning: {
+      backgroundColor: '#fff3cd',
+      color: '#856404',
+      padding: '12px 20px',
+      borderRadius: '4px',
+      marginBottom: '20px',
+      border: '1px solid #ffeaa7'
     }
   };
 
@@ -1077,6 +1077,12 @@ const ForestBiomassApp = () => {
       {error && (
         <div style={styles.error}>
           <strong>Error:</strong> {error}
+        </div>
+      )}
+
+      {rateLimitExpiry > Date.now() && (
+        <div style={styles.warning}>
+          <strong>Rate Limited:</strong> API rate limit reached. Next request allowed in {Math.ceil((rateLimitExpiry - Date.now()) / 1000)} seconds.
         </div>
       )}
 
@@ -1304,7 +1310,7 @@ protocol/openid-connect/token`}
           </div>
           
           <p style={{ fontSize: '14px', color: '#666', marginBottom: '20px' }}>
-            NDVI time series from Sentinel-2 MSI (100m statistical resolution).
+            NDVI time series from Sentinel-2 MSI (20m statistical resolution).
             Cloud-filtered scenes with less than {cloudCoverage}% cloud coverage.
             Processed via Copernicus Data Space Statistical API.
           </p>
@@ -1490,13 +1496,13 @@ protocol/openid-connect/token`}
         <h4>Technical Implementation Details</h4>
         <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
           <li><strong>✅ REAL DATA ONLY</strong> - No simulated or estimated values. Only actual satellite measurements displayed.</li>
-          <li><strong>✅ RESOLUTION FIX</strong> - Fixed resolution to 100m to stay under the 1500m API limit</li>
-          <li><strong>✅ SINGLE DAY AGGREGATION</strong> - Using P1D aggregation interval to avoid resolution multiplication issues</li>
+          <li><strong>✅ RESOLUTION FIX</strong> - Using 20m resolution (native Sentinel-2) to avoid API limits</li>
+          <li><strong>✅ SINGLE DAY SEARCH</strong> - Search and aggregation use exact acquisition date to prevent resolution multiplication</li>
           <li><strong>✅ WINTER HANDLING</strong> - Adaptive SCL masking for winter months (Dec-Mar)</li>
-          <li><strong>✅ ENHANCED ERROR HANDLING</strong> - Proper handling of empty data arrays and API errors</li>
+          <li><strong>✅ RATE LIMIT HANDLING</strong> - Exponential backoff with 10s minimum delay between requests</li>
           <li><strong>API Configuration:</strong>
             <ul>
-              <li>Statistical API Resolution: 100m x 100m (well under 1500m limit)</li>
+              <li>Statistical API Resolution: 20m x 20m (Sentinel-2 native resolution)</li>
               <li>Aggregation Interval: P1D (single day)</li>
               <li>Collection: sentinel-2-l2a</li>
               <li>Mosaicking: leastCC (least cloud coverage)</li>
@@ -1506,8 +1512,8 @@ protocol/openid-connect/token`}
             <ul>
               <li>NDVI Calculation: (B08 - B04) / (B08 + B04)</li>
               <li>Valid Pixel Threshold: 5% (winter) / 10% (other seasons)</li>
-              <li>Rate Limiting: 5 second delay between requests</li>
-              <li>Batch Size: 2 products per batch</li>
+              <li>Rate Limiting: 10 second minimum delay between requests</li>
+              <li>Batch Size: 1 product at a time</li>
             </ul>
           </li>
           <li><strong>Data Quality:</strong>
