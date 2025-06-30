@@ -457,7 +457,7 @@ const ForestBiomassApp = () => {
               from: currentSearchStartDate.toISOString(),
               to: currentSearchEndDate.toISOString()
             },
-            maxCloudCoverage: actualCloudCoverage / 100,
+            maxCloudCoverage: maxCloudCoverage / 100,
             mosaickingOrder: "leastCC"
           }
         }]
