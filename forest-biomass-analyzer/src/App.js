@@ -105,83 +105,31 @@ const ForestBiomassApp = () => {
   const [authenticated, setAuthenticated] = useState(false);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
-  const [cloudCoverage, setCloudCoverage] = useState(30);
   const [processingStatus, setProcessingStatus] = useState('');
-  const [trendStartDate, setTrendStartDate] = useState('');
-  const [trendEndDate, setTrendEndDate] = useState('');
-  const [skippedDataCount, setSkippedDataCount] = useState(0);
-  const [debugMode, setDebugMode] = useState(true);
-  const [apiStats, setApiStats] = useState({
-    totalRequests: 0,
-    successfulRequests: 0,
-    emptyResponses: 0,
-    errors: 0
-  });
+  const [accessToken, setAccessToken] = useState('');
+  const [tokenExpiry, setTokenExpiry] = useState(null);
   const mapRef = useRef();
-  
-  // Use refs to avoid stale closure issues with token management
-  const authRef = useRef({
-    accessToken: '',
-    tokenExpiry: null,
-    isAuthenticating: false,
-    lastAuthTime: 0
-  });
-  
-  // Global rate limit state
-  const [rateLimitExpiry, setRateLimitExpiry] = useState(0);
+
+  // Forest parameters for biomass estimation from vegetation index
+  const forestParams = {
+    pine: { baselineBiomass: 150, maxBiomass: 350 },
+    fir: { baselineBiomass: 180, maxBiomass: 400 },
+    birch: { baselineBiomass: 100, maxBiomass: 250 },
+    aspen: { baselineBiomass: 80, maxBiomass: 200 }
+  };
 
   // Load GeometryUtil on mount
   useEffect(() => {
     loadGeometryUtil();
   }, []);
 
-  // Forest growth parameters for biomass estimation from NDVI
-  const forestParams = {
-    pine: { maxBiomass: 350, a: 0.7, b: 1.2 },
-    fir: { maxBiomass: 400, a: 0.75, b: 1.15 },
-    birch: { maxBiomass: 250, a: 0.65, b: 1.3 },
-    aspen: { maxBiomass: 200, a: 0.6, b: 1.35 }
-  };
-
-  // Convert NDVI to biomass using empirical relationship
-  const ndviToBiomass = (ndvi, forestType) => {
-    const params = forestParams[forestType];
-    return params.a * Math.exp(params.b * ndvi) * params.maxBiomass / 10;
-  };
-
-  // Get current access token from ref
-  const getAccessToken = () => authRef.current.accessToken;
-
-  // Check if token is valid using ref
-  const isTokenValid = () => {
-    const now = Date.now();
-    return authRef.current.accessToken && 
-           authRef.current.tokenExpiry && 
-           now < authRef.current.tokenExpiry;
-  };
-
-  // Authenticate with Copernicus Data Space Ecosystem
+  // Authenticate with Copernicus Data Space
   const authenticateCDSE = async () => {
-    // Prevent concurrent authentication attempts
-    if (authRef.current.isAuthenticating) {
-      console.log('Authentication already in progress');
-      return false;
-    }
-    
-    // Prevent rapid re-authentication (minimum 5 second gap)
-    const now = Date.now();
-    if (now - authRef.current.lastAuthTime < 5000) {
-      console.log('Too soon to re-authenticate');
-      return false;
-    }
-    
     if (!clientId || !clientSecret) {
-      setError('Missing credentials: Client ID and Client Secret required');
+      setError('Client ID and Client Secret required');
       return false;
     }
 
-    authRef.current.isAuthenticating = true;
-    authRef.current.lastAuthTime = now;
     setError(null);
     setProcessingStatus('Authenticating...');
 
@@ -201,233 +149,94 @@ const ForestBiomassApp = () => {
       });
 
       if (!tokenResponse.ok) {
-        const errorData = await tokenResponse.json();
-        throw new Error(`HTTP ${tokenResponse.status}: ${errorData.error_description || tokenResponse.statusText}`);
+        throw new Error(`Authentication failed: ${tokenResponse.status}`);
       }
 
       const tokenResult = await tokenResponse.json();
-      
-      // Update auth ref with new token data
-      authRef.current.accessToken = tokenResult.access_token;
-      // Calculate token expiry with 60 second safety margin
-      authRef.current.tokenExpiry = Date.now() + ((tokenResult.expires_in - 60) * 1000);
-      
+      setAccessToken(tokenResult.access_token);
+      setTokenExpiry(Date.now() + ((tokenResult.expires_in - 60) * 1000));
       setAuthenticated(true);
       setProcessingStatus('');
       
-      console.log(`Token acquired. Expires in: ${tokenResult.expires_in}s (${new Date(authRef.current.tokenExpiry).toLocaleTimeString()})`);
       return true;
     } catch (err) {
-      if (err.message.includes('Failed to fetch')) {
-        setError('CORS blocked. Solutions:\n1. Configure OAuth client for SPA with domain whitelist\n2. Use manual token entry field\n3. Implement backend proxy endpoint');
-      } else {
-        setError(`Authentication failed: ${err.message}`);
-      }
+      setError(`Authentication failed: ${err.message}`);
       setProcessingStatus('');
       return false;
-    } finally {
-      authRef.current.isAuthenticating = false;
     }
   };
-  
-  // Re-authenticate when token expires
-  const reauthenticate = async () => {
-    console.log('Re-authenticating with client credentials...');
-    return await authenticateCDSE();
-  };
-  
-  // Ensure valid token before API calls
-  const ensureValidToken = async () => {
-    if (!isTokenValid()) {
-      console.log('Token expired or missing. Re-authenticating...');
-      return await reauthenticate();
-    }
-    return true;
-  };
 
-  // Search for Sentinel-2 products with token validation
-  const searchSentinel2Products = async (polygon, startDate, endDate) => {
-    // Ensure valid token before API call
-    if (!await ensureValidToken()) {
-      throw new Error('Failed to obtain valid token');
-    }
+  // Calculate vegetation index from RGB pixel data
+  const calculateVegetationIndex = (pixelData) => {
+    let totalGreenness = 0;
+    let validPixels = 0;
     
-    const coords = polygon.coords.map(coord => [coord[1], coord[0]]); // Convert to lon,lat
-    const coordsString = [...coords, coords[0]].map(c => `${c[0]} ${c[1]}`).join(',');
-    const wktPolygon = `POLYGON((${coordsString}))`;
-
-    // Build filter string
-    const collectionFilter = `Collection/Name eq 'SENTINEL-2'`;
-    const spatialFilter = `OData.CSC.Intersects(area=geography'SRID=4326;${wktPolygon}')`;
-    const dateStartFilter = `ContentDate/Start gt ${startDate}T00:00:00.000Z`;
-    const dateEndFilter = `ContentDate/Start lt ${endDate}T00:00:00.000Z`;
-    const cloudFilter = `Attributes/OData.CSC.DoubleAttribute/any(att:att/Name eq 'cloudCover' and att/OData.CSC.DoubleAttribute/Value le ${cloudCoverage}.00)`;
-    const productTypeFilter = `Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/OData.CSC.StringAttribute/Value eq 'S2MSI2A')`;
-
-    const filterQuery = `${collectionFilter} and ${spatialFilter} and ${dateStartFilter} and ${dateEndFilter} and ${cloudFilter} and ${productTypeFilter}`;
-    const searchUrl = `https://catalogue.dataspace.copernicus.eu/odata/v1/Products?$filter=${encodeURIComponent(filterQuery)}&$orderby=ContentDate/Start&$top=100`;
-
-    const response = await fetch(searchUrl, {
-      headers: {
-        'Authorization': `Bearer ${getAccessToken()}`
-      }
-    });
-
-    if (response.status === 401) {
-      // Token expired, try to re-authenticate once
-      console.log('Search returned 401. Re-authenticating...');
-      if (await reauthenticate()) {
-        // Retry with new token
-        const retryResponse = await fetch(searchUrl, {
-          headers: {
-            'Authorization': `Bearer ${getAccessToken()}`
-          }
-        });
-        
-        if (!retryResponse.ok) {
-          throw new Error(`Search failed after re-authentication: ${retryResponse.status}`);
-        }
-        
-        const data = await retryResponse.json();
-        return data.value || [];
-      } else {
-        throw new Error('Authentication failed');
-      }
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Search error:', errorText);
-      throw new Error(`Search failed: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data.value || [];
-  };
-
-  // Process Sentinel-2 NDVI data using Sentinel Hub Statistical API - REAL DATA ONLY
-  const processSentinel2NDVI = async (product, polygon, cloudCoverage, debugMode = false) => {
-    const acquisitionDate = new Date(product.ContentDate.Start);
-    const dateStr = acquisitionDate.toISOString().split('T')[0];
-    const month = acquisitionDate.getMonth() + 1;
-    
-    // Detect winter months (December-March) for Finland
-    const isWinterMonth = month === 12 || month === 1 || month === 2 || month === 3;
-    
-    // Try different cloud coverage thresholds if no data found
-    const cloudCoverageSteps = [cloudCoverage, 50, 70, 90];
-    
-    for (const maxCloudCoverage of cloudCoverageSteps) {
-      if (maxCloudCoverage < cloudCoverage) continue;
+    // Process every 4th value (RGBA format)
+    for (let i = 0; i < pixelData.length; i += 4) {
+      const r = pixelData[i];
+      const g = pixelData[i + 1];
+      const b = pixelData[i + 2];
+      const a = pixelData[i + 3];
       
-      // CRITICAL FIX: Use exact acquisition date only for both search and aggregation
-      // This prevents resolution multiplication issues
-      const searchStartDate = new Date(acquisitionDate);
-      const searchEndDate = new Date(acquisitionDate);
-      searchEndDate.setDate(searchEndDate.getDate() + 1); // Next day to create valid range
+      // Skip transparent or black pixels
+      if (a < 128 || (r === 0 && g === 0 && b === 0)) continue;
       
-      if (debugMode || maxCloudCoverage > cloudCoverage) {
-        console.log(`Trying with ${maxCloudCoverage}% cloud coverage for ${dateStr}`);
+      // Simple vegetation index: (G - R) / (G + R)
+      // Higher values indicate more vegetation
+      if (g + r > 0) {
+        const vi = (g - r) / (g + r);
+        totalGreenness += vi;
+        validPixels++;
       }
+    }
     
-      // ENHANCED evalscript with correct output configuration
-      const evalscript = `
+    return validPixels > 0 ? totalGreenness / validPixels : 0;
+  };
+
+  // Estimate biomass from vegetation index
+  const estimateBiomass = (vegetationIndex, forestType) => {
+    const params = forestParams[forestType];
+    // Map vegetation index (-1 to 1) to biomass range
+    const normalizedVI = (vegetationIndex + 1) / 2; // Convert to 0-1 range
+    return params.baselineBiomass + (normalizedVI * (params.maxBiomass - params.baselineBiomass));
+  };
+
+  // Process satellite image for a specific date
+  const processSatelliteImage = async (polygon, date) => {
+    const coords = polygon.coords.map(coord => [coord[1], coord[0]]); // lon,lat
+    
+    // Sentinel Hub Process API evalscript for RGB visualization
+    const evalscript = `
       //VERSION=3
       function setup() {
         return {
-          input: [{
-            bands: ["B03", "B04", "B08", "B11", "SCL", "dataMask"],
-            units: "DN"
-          }],
-          output: [
-            {
-              id: "ndvi",
-              bands: 1,
-              sampleType: "FLOAT32"
-            },
-            {
-              id: "dataMask", 
-              bands: 1,
-              sampleType: "UINT8"
-            }
-          ]
+          input: ["B04", "B03", "B02", "dataMask"],
+          output: { bands: 4 }
         };
       }
       
-      function evaluatePixel(samples) {
-        // Check if pixel is valid (not no-data)
-        if (samples.dataMask === 0) {
-          return {
-            ndvi: NaN,
-            dataMask: 0
-          };
-        }
-        
-        // Calculate NDSI (Normalized Difference Snow Index)
-        const ndsi = (samples.B03 - samples.B11) / (samples.B03 + samples.B11);
-        const isSnow = ndsi > 0.4 && samples.B03 > 0.15;
-        
-        // SCL values: 0=No Data, 1=Saturated, 3=Cloud Shadows, 8=Med Cloud, 9=High Cloud, 10=Cirrus, 11=Snow
-        const scl = samples.SCL;
-        
-        // Winter handling: be more lenient with snow pixels
-        const isWinter = ${isWinterMonth};
-        
-        // Exclude only critical invalid pixels
-        const isInvalid = (scl === 0 || scl === 1 || scl === 9);
-        
-        // For winter months, don't exclude snow pixels (SCL 11) or shadows
-        const shouldExclude = isWinter ? isInvalid : (isInvalid || scl === 3 || scl === 8 || scl === 10 || scl === 11);
-        
-        if (shouldExclude && !isWinter) {
-          return {
-            ndvi: NaN,
-            dataMask: 0
-          };
-        }
-        
-        // Calculate NDVI
-        const red = samples.B04;
-        const nir = samples.B08;
-        
-        // Handle division by zero
-        if (nir + red === 0) {
-          return {
-            ndvi: 0,
-            dataMask: 0
-          };
-        }
-        
-        const ndvi = (nir - red) / (nir + red);
-        
-        // Validate NDVI range
-        if (isNaN(ndvi) || ndvi < -1 || ndvi > 1) {
-          return {
-            ndvi: 0,
-            dataMask: 0
-          };
-        }
-        
-        // For winter/snow pixels, NDVI might be low but still valid
-        const validPixel = isWinter || !isSnow ? 1 : 0.5;
-        
-        return {
-          ndvi: ndvi,
-          dataMask: validPixel
-        };
+      function evaluatePixel(sample) {
+        // True color RGB with simple enhancement
+        return [
+          sample.B04 * 2.5,  // Red
+          sample.B03 * 2.5,  // Green
+          sample.B02 * 2.5,  // Blue
+          sample.dataMask    // Alpha
+        ];
       }
     `;
     
-    const coordinates = polygon.coords.map(coord => [coord[1], coord[0]]); // lon, lat
+    // Create bounds for the request
+    const bounds = {
+      type: "Polygon",
+      coordinates: [[...coords, coords[0]]]
+    };
     
-    // Statistical API request with FIXED resolution handling
-    const statsRequest = {
+    // Process API request
+    const processRequest = {
       input: {
         bounds: {
-          geometry: {
-            type: "Polygon",
-            coordinates: [[...coordinates, coordinates[0]]]
-          },
+          geometry: bounds,
           properties: {
             crs: "http://www.opengis.net/def/crs/EPSG/0/4326"
           }
@@ -436,274 +245,68 @@ const ForestBiomassApp = () => {
           type: "sentinel-2-l2a",
           dataFilter: {
             timeRange: {
-              from: searchStartDate.toISOString(),
-              to: searchEndDate.toISOString()
+              from: `${date}T00:00:00Z`,
+              to: `${date}T23:59:59Z`
             },
-            maxCloudCoverage: maxCloudCoverage / 100,
-            mosaickingOrder: "leastCC"
+            maxCloudCoverage: 30
           }
         }]
       },
-      aggregation: {
-        timeRange: {
-          from: searchStartDate.toISOString(),
-          to: searchEndDate.toISOString()
-        },
-        aggregationInterval: {
-          of: "P1D" // Single day aggregation
-        },
-        evalscript: evalscript,
-        // CRITICAL: Higher resolution to prevent limit issues
-        resx: 20, // 20m resolution - native Sentinel-2 resolution
-        resy: 20  // 20m resolution - native Sentinel-2 resolution
-      },
-      calculations: {
-        ndvi: {
-          statistics: {
-            default: {
-              percentiles: {
-                k: [25, 50, 75]
-              }
-            }
+      output: {
+        width: 512,
+        height: 512,
+        responses: [{
+          identifier: "default",
+          format: {
+            type: "image/png"
           }
-        }
-      }
+        }]
+      },
+      evalscript: evalscript
     };
     
-      console.log(`Processing ${dateStr} with single day window at 20m resolution`);
-      if (debugMode) {
-        console.log('Stats Request:', JSON.stringify(statsRequest, null, 2));
+    try {
+      const response = await fetch('https://sh.dataspace.copernicus.eu/api/v1/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify(processRequest)
+      });
+      
+      if (!response.ok) {
+        console.error(`Failed to fetch image for ${date}: ${response.status}`);
+        return null;
       }
       
-      let retries = 0;
-      const maxRetries = 3;
-      let baseDelay = 1000;
+      // Convert image to pixel data
+      const blob = await response.blob();
+      const imageBitmap = await createImageBitmap(blob);
       
-      while (retries < maxRetries) {
-      try {
-        // Check rate limit before making request
-        const now = Date.now();
-        if (rateLimitExpiry > now) {
-          const waitTime = rateLimitExpiry - now;
-          console.log(`Rate limited. Waiting ${Math.ceil(waitTime / 1000)}s...`);
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-        }
-        
-        // Ensure valid token before API call
-        if (!isTokenValid() && !(await reauthenticate())) {
-          throw new Error('Failed to obtain valid token');
-        }
-        
-        const response = await fetch('https://sh.dataspace.copernicus.eu/api/v1/statistics', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${getAccessToken()}`
-          },
-          body: JSON.stringify(statsRequest)
-        });
-        
-        if (response.status === 401 && retries < maxRetries - 1) {
-          console.log('Statistical API returned 401. Re-authenticating...');
-          if (await reauthenticate()) {
-            retries++;
-            await new Promise(resolve => setTimeout(resolve, baseDelay * retries));
-            continue;
-          } else {
-            throw new Error('Failed to re-authenticate');
-          }
-        }
-        
-        if (response.status === 429) {
-          const retryAfterHeader = response.headers.get('retry-after');
-          const retryAfterMs = retryAfterHeader ? parseInt(retryAfterHeader) * 1000 : 60000;
-          
-          setRateLimitExpiry(Date.now() + retryAfterMs);
-          console.log(`Rate limit hit. Retry after ${retryAfterMs}ms`);
-          
-          const error = new Error('Rate limit exceeded');
-          error.status = 429;
-          error.retryAfter = retryAfterMs;
-          throw error;
-        }
-        
-        if (!response.ok) {
-          console.error(`Statistical API error: ${response.status}`);
-          const errorText = await response.text();
-          console.error('Error details:', errorText);
-          
-          try {
-            const errorData = JSON.parse(errorText);
-            if (errorData.message && errorData.message.includes('meters per pixel exceeds')) {
-              console.error('Resolution limit exceeded. This should not happen with 20m resolution.');
-              // Try with even higher resolution as fallback
-              console.log('Retrying with 10m resolution...');
-              statsRequest.aggregation.resx = 10;
-              statsRequest.aggregation.resy = 10;
-              retries++;
-              continue;
-            }
-          } catch (e) {
-            // Not JSON error response
-          }
-          
-          break; // Exit retry loop for this cloud coverage threshold
-        }
-        
-        const statsData = await response.json();
-        
-        // LOG COMPLETE RESPONSE STRUCTURE
-        if (debugMode) {
-          console.log('=== FULL API RESPONSE STRUCTURE ===');
-          console.log('Response type:', typeof statsData);
-          console.log('Response keys:', Object.keys(statsData));
-          console.log('Full response:', JSON.stringify(statsData, null, 2));
-        }
-        
-        // Check if we got any data
-        if (statsData && statsData.data && Array.isArray(statsData.data) && statsData.data.length > 0) {
-          // Process the data as before
-          if (debugMode) {
-            console.log(`Found ${statsData.data.length} intervals in response`);
-          }
-          
-          for (let i = 0; i < statsData.data.length; i++) {
-            const interval = statsData.data[i];
-            if (debugMode) {
-              console.log(`\n=== Interval ${i} ===`);
-              console.log('Interval keys:', Object.keys(interval));
-              console.log('Interval from/to:', interval.interval?.from, '-', interval.interval?.to);
-            }
-            
-            if (interval.outputs) {
-              if (debugMode) {
-                console.log('Outputs keys:', Object.keys(interval.outputs));
-                console.log('Outputs structure:', JSON.stringify(interval.outputs, null, 2));
-              }
-              
-              // Check both 'ndvi' and 'default' outputs
-              const ndviOutput = interval.outputs.ndvi || interval.outputs.default;
-              
-              if (ndviOutput) {
-                if (debugMode) {
-                  console.log('NDVI output found, structure:', JSON.stringify(ndviOutput, null, 2));
-                }
-                
-                if (ndviOutput.bands) {
-                  if (debugMode) {
-                    console.log('Bands keys:', Object.keys(ndviOutput.bands));
-                  }
-                  
-                  const band = ndviOutput.bands.B0 || ndviOutput.bands['0'];
-                  if (band && band.stats) {
-                    const stats = band.stats;
-                    
-                    if (debugMode) {
-                      console.log(`Stats for ${dateStr}:`, {
-                        sampleCount: stats.sampleCount,
-                        noDataCount: stats.noDataCount,
-                        validPixels: stats.sampleCount - stats.noDataCount,
-                        mean: stats.mean,
-                        min: stats.min,
-                        max: stats.max,
-                        stDev: stats.stDev,
-                        percentiles: stats.percentiles,
-                        isWinter: isWinterMonth
-                      });
-                    }
-                    
-                    // Check if we have valid data
-                    if (stats.sampleCount > 0 && stats.sampleCount > stats.noDataCount) {
-                      const validPixelRatio = (stats.sampleCount - stats.noDataCount) / stats.sampleCount;
-                      
-                      // More lenient threshold for winter months
-                      const minValidRatio = isWinterMonth ? 0.05 : 0.1;
-                      
-                      if (validPixelRatio >= minValidRatio) {
-                        // Use mean if available
-                        let ndviValue = null;
-                        
-                        if (typeof stats.mean === 'number' && !isNaN(stats.mean)) {
-                          ndviValue = stats.mean;
-                        } else if (stats.percentiles) {
-                          // Try different percentile keys
-                          ndviValue = stats.percentiles['50.0'] || 
-                                     stats.percentiles['50'] || 
-                                     stats.percentiles['p50'] ||
-                                     stats.percentiles[50] ||
-                                     null;
-                          if (debugMode) {
-                            console.log('Using percentile value:', ndviValue, 'from:', Object.keys(stats.percentiles));
-                          }
-                        }
-                        
-                        if (ndviValue !== null && !isNaN(ndviValue)) {
-                          const isValidRange = ndviValue >= -1 && ndviValue <= 1;
-                          
-                          if (isValidRange) {
-                            console.log(`SUCCESS: Real NDVI value ${ndviValue} for ${dateStr} (cloud coverage: ${maxCloudCoverage}%)`);
-                            return { 
-                              ndvi: ndviValue, 
-                              isWinter: isWinterMonth,
-                              validPixelRatio: validPixelRatio
-                            };
-                          } else if (debugMode) {
-                            console.log(`NDVI value ${ndviValue} out of range`);
-                          }
-                        } else if (debugMode) {
-                          console.log('No valid NDVI value found in stats');
-                        }
-                      } else if (debugMode) {
-                        console.log(`Insufficient valid pixels: ${(validPixelRatio * 100).toFixed(1)}%`);
-                      }
-                    } else if (debugMode) {
-                      console.log('No valid pixels in stats');
-                    }
-                  } else if (debugMode) {
-                    console.log('No stats found in band data');
-                  }
-                } else if (debugMode) {
-                  console.log('No bands found in NDVI output');
-                }
-              } else if (debugMode) {
-                console.log('No NDVI or default output found');
-              }
-            } else if (debugMode) {
-              console.log('No outputs found in interval');
-            }
-          } // End processing intervals loop
-          
-          // Successfully got data, break out of retry loop
-          break;
-        } else {
-          // No data found with current cloud coverage, try next threshold
-          if (debugMode || maxCloudCoverage === cloudCoverage) {
-            console.log(`No data returned for ${dateStr} with ${maxCloudCoverage}% cloud coverage. ${maxCloudCoverage < 90 ? 'Trying higher threshold...' : 'No more thresholds to try.'}`);
-          }
-          break; // Exit retry loop to try next cloud coverage
-        }
-        
-      } catch (error) {
-        if (error.status === 429) {
-          throw error; // Re-throw rate limit errors to be handled by caller
-        }
-        if (retries >= maxRetries - 1) {
-          console.error('NDVI processing error after retries:', error);
-          break; // Exit retry loop to try next cloud coverage
-        }
-        retries++;
-        baseDelay *= 2; // Exponential backoff
-        await new Promise(resolve => setTimeout(resolve, baseDelay));
-      }
-    } // End retry loop
-    } // End cloud coverage loop
-    
-    // If we've tried all cloud coverage thresholds and still no data
-    console.warn(`No valid NDVI data for ${dateStr} even with relaxed cloud coverage up to 90%. Skipping.`);
-    return null;
+      // Create canvas to extract pixel data
+      const canvas = document.createElement('canvas');
+      canvas.width = imageBitmap.width;
+      canvas.height = imageBitmap.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(imageBitmap, 0, 0);
+      
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const vegetationIndex = calculateVegetationIndex(imageData.data);
+      
+      return {
+        vegetationIndex,
+        imageUrl: URL.createObjectURL(blob),
+        width: imageBitmap.width,
+        height: imageBitmap.height
+      };
+    } catch (error) {
+      console.error(`Error processing image for ${date}:`, error);
+      return null;
+    }
   };
 
-  // Fetch satellite data main function - REAL DATA ONLY
+  // Fetch satellite data for summer months only
   const fetchSatelliteData = async () => {
     if (selectedForests.length === 0) {
       setError('Draw at least one forest polygon');
@@ -711,181 +314,62 @@ const ForestBiomassApp = () => {
     }
 
     if (!authenticated) {
-      setError('Authenticate with Copernicus Data Space first');
+      setError('Authenticate first');
       return;
-    }
-
-    // Ensure token is valid before starting
-    if (!isTokenValid()) {
-      setProcessingStatus('Token expired. Re-authenticating...');
-      const success = await reauthenticate();
-      if (!success) {
-        setError('Re-authentication failed. Please enter credentials again.');
-        return;
-      }
     }
 
     setLoading(true);
     setError(null);
     setBiomassData([]);
-    setProcessingStatus('Searching for Sentinel-2 products...');
-    setApiStats({
-      totalRequests: 0,
-      successfulRequests: 0,
-      emptyResponses: 0,
-      errors: 0
-    });
+    setProcessingStatus('Processing satellite imagery...');
 
     try {
       const selectedForest = selectedForests[selectedForestIndex];
-      const endDate = new Date().toISOString().split('T')[0];
-
-      // Start from 2023 for demonstration (can be changed to earlier years)
-      const startYear = 2023;
-      const endYear = new Date().getFullYear();
-      const allProducts = [];
-
-      for (let year = startYear; year <= endYear; year++) {
-        const yearStart = `${year}-01-01`;
-        const yearEnd = year === endYear ? endDate : `${year}-12-31`;
-
-        setProcessingStatus(`Fetching data for ${year}...`);
-
-        try {
-          const yearProducts = await searchSentinel2Products(selectedForest, yearStart, yearEnd);
-          allProducts.push(...yearProducts);
-
-          if (year < endYear) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-        } catch (err) {
-          console.warn(`Failed to fetch data for ${year}:`, err);
-        }
-      }
-
-      if (allProducts.length === 0) {
-        setError('No Sentinel-2 products found for the selected area');
-        return;
-      }
-
-      setProcessingStatus(`Found ${allProducts.length} products. Processing NDVI...`);
-
-      // Process products with rate limiting
-      const biomassResults = [];
-      const batchSize = 1; // Process one at a time to avoid rate limits
-      const minDelay = 10000; // Minimum 10 seconds between requests
-      let realDataCount = 0;
-      let skippedCount = 0;
-      let totalRequests = 0;
-      let successfulRequests = 0;
-      let emptyResponses = 0;
-      let errors = 0;
-
-      for (let i = 0; i < allProducts.length; i += batchSize) {
-        const batch = allProducts.slice(i, i + batchSize);
-
-        for (const product of batch) {
-          const date = new Date(product.ContentDate.Start).toISOString().split('T')[0];
-
-          // Add delay between requests with exponential backoff on errors
-          await new Promise(resolve => setTimeout(resolve, minDelay));
-
-          totalRequests++;
-          
-          try {
-            const ndviResult = await processSentinel2NDVI(product, selectedForest, cloudCoverage, debugMode);
-            
-            if (ndviResult === null) {
-              skippedCount++;
-              emptyResponses++;
-              console.log(`No data available for ${date}, skipping...`);
-              continue;
-            }
-            
-            successfulRequests++;
-            realDataCount++;
-            
-            // Calculate biomass
-            let biomass = ndviToBiomass(ndviResult.ndvi, selectedForest.type);
-            if (ndviResult.isWinter) {
-              // Winter correction factors
-              const winterCorrection = {
-                pine: 1.2,
-                fir: 1.2,
-                birch: 1.5,
-                aspen: 1.5
-              };
-              biomass *= winterCorrection[selectedForest.type] || 1.3;
-            }
-
-            const cloudCoverAttr = product.Attributes?.find(attr =>
-              attr.Name === 'cloudCover' && attr.ValueType === 'Double'
-            );
-            const cloudCoverValue = cloudCoverAttr ? cloudCoverAttr.Value : 0;
-
-            biomassResults.push({
-              date: date,
-              year: parseInt(date.split('-')[0]),
-              month: parseInt(date.split('-')[1]),
-              ndvi: ndviResult.ndvi,
-              biomass: biomass,
-              productId: product.Id,
-              productName: product.Name,
-              cloudCover: cloudCoverValue,
-              footprint: product.GeoFootprint,
-              isWinter: ndviResult.isWinter || false,
-              validPixelRatio: ndviResult.validPixelRatio || 0
-            });
-            
-          } catch (error) {
-            errors++;
-            if (error.status === 429 && error.retryAfter) {
-              setRateLimitExpiry(Date.now() + error.retryAfter);
-              console.log(`Rate limited. Will retry after ${error.retryAfter}ms`);
-              // Wait for rate limit to expire
-              await new Promise(resolve => setTimeout(resolve, error.retryAfter));
-            } else {
-              console.error(`Failed to process product: ${error.message}`);
-              skippedCount++;
-            }
-          }
-        }
-
-        setProcessingStatus(`Processing: ${Math.round((i + batchSize) / allProducts.length * 100)}% complete (${realDataCount} successful, ${skippedCount} skipped)`);
+      const currentYear = new Date().getFullYear();
+      const results = [];
+      
+      // Process last 3 years of summer data
+      for (let year = currentYear - 2; year <= currentYear; year++) {
+        // Summer months in Finland: May to August
+        const summerMonths = [
+          { month: 5, day: 15 },  // Mid-May
+          { month: 6, day: 15 },  // Mid-June
+          { month: 7, day: 15 },  // Mid-July
+          { month: 8, day: 15 }   // Mid-August
+        ];
         
-        setApiStats({
-          totalRequests,
-          successfulRequests,
-          emptyResponses,
-          errors
-        });
+        for (const { month, day } of summerMonths) {
+          const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          
+          setProcessingStatus(`Processing ${date}...`);
+          
+          const imageData = await processSatelliteImage(selectedForest, date);
+          
+          if (imageData) {
+            const biomass = estimateBiomass(imageData.vegetationIndex, selectedForest.type);
+            
+            results.push({
+              date,
+              year,
+              month,
+              vegetationIndex: imageData.vegetationIndex,
+              biomass,
+              imageUrl: imageData.imageUrl
+            });
+          }
+          
+          // Rate limiting: 2 second delay between requests
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
       }
-
+      
       // Sort by date
-      biomassResults.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-      // Calculate annual means
-      const yearlyBiomass = {};
-      biomassResults.forEach(point => {
-        if (!yearlyBiomass[point.year]) {
-          yearlyBiomass[point.year] = [];
-        }
-        yearlyBiomass[point.year].push(point.biomass);
-      });
-
-      biomassResults.forEach(point => {
-        const yearData = yearlyBiomass[point.year];
-        if (yearData && yearData.length > 0) {
-          point.biomassMean = yearData.reduce((sum, val) => sum + val, 0) / yearData.length;
-        }
-      });
-
-      setBiomassData(biomassResults);
-      setSkippedDataCount(skippedCount);
+      results.sort((a, b) => new Date(a.date) - new Date(b.date));
+      
+      setBiomassData(results);
       setProcessingStatus('');
     } catch (err) {
-      setError('Data fetch error: ' + err.message);
-      console.error('Error:', err);
+      setError(`Processing error: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -914,8 +398,7 @@ const ForestBiomassApp = () => {
       id: Date.now(),
       coords: coords.map(c => [c.lat, c.lng]),
       area: area.toFixed(2),
-      type: forestType,
-      analysisYear: new Date().getFullYear()
+      type: forestType
     };
 
     setSelectedForests(prev => [...prev, newForest]);
@@ -933,9 +416,7 @@ const ForestBiomassApp = () => {
       maxWidth: '1200px',
       margin: '0 auto',
       padding: '20px',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-      minHeight: '100vh',
-      overflowY: 'auto'
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
     },
     header: {
       textAlign: 'center',
@@ -998,8 +479,7 @@ const ForestBiomassApp = () => {
       marginBottom: '20px',
       borderRadius: '8px',
       overflow: 'hidden',
-      boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-      position: 'relative'
+      boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
     },
     chartContainer: {
       backgroundColor: 'white',
@@ -1034,14 +514,6 @@ const ForestBiomassApp = () => {
       fontSize: '18px',
       color: '#666'
     },
-    success: {
-      backgroundColor: '#d4edda',
-      color: '#155724',
-      padding: '12px 20px',
-      borderRadius: '4px',
-      marginBottom: '20px',
-      border: '1px solid #c3e6cb'
-    },
     info: {
       backgroundColor: '#d1ecf1',
       color: '#0c5460',
@@ -1049,29 +521,21 @@ const ForestBiomassApp = () => {
       borderRadius: '4px',
       marginBottom: '20px',
       border: '1px solid #bee5eb'
-    },
-    warning: {
-      backgroundColor: '#fff3cd',
-      color: '#856404',
-      padding: '12px 20px',
-      borderRadius: '4px',
-      marginBottom: '20px',
-      border: '1px solid #ffeaa7'
     }
   };
 
   return (
     <div style={styles.container}>
-      <h1 style={styles.header}>Forest Biomass Analysis - Real Sentinel-2 Data Only</h1>
+      <h1 style={styles.header}>Forest Biomass Analysis - Sentinel-2 Summer Data</h1>
       
       <div style={styles.info}>
-        <strong>Important:</strong> This application uses real Sentinel-2 satellite data. Data availability depends on:
+        <strong>Technical Overview:</strong>
         <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
-          <li>Satellite revisit frequency (5 days at equator, 2-3 days at higher latitudes)</li>
-          <li>Cloud coverage (especially challenging in winter months)</li>
-          <li>Valid pixels after atmospheric correction and quality masking</li>
+          <li>Data Source: Sentinel-2 L2A true color imagery (RGB bands: B04, B03, B02)</li>
+          <li>Processing: Vegetation index calculated as (G-R)/(G+R) from pixel values</li>
+          <li>Temporal Coverage: Summer months only (May-August) to avoid snow cover</li>
+          <li>Spatial Resolution: 512x512 pixels per polygon</li>
         </ul>
-        Some dates may have no data available due to these constraints.
       </div>
 
       {error && (
@@ -1080,49 +544,15 @@ const ForestBiomassApp = () => {
         </div>
       )}
 
-      {rateLimitExpiry > Date.now() && (
-        <div style={styles.warning}>
-          <strong>Rate Limited:</strong> API rate limit reached. Next request allowed in {Math.ceil((rateLimitExpiry - Date.now()) / 1000)} seconds.
-        </div>
-      )}
-
-      {authenticated && authRef.current.accessToken && (
-        <div style={styles.info}>
-          <strong>Authentication Status:</strong>
-          <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
-            <li>Token acquired: {new Date().toLocaleTimeString()}</li>
-            <li>Token expires: {authRef.current.tokenExpiry ? new Date(authRef.current.tokenExpiry).toLocaleTimeString() : 'Unknown'}</li>
-            <li>Time remaining: {authRef.current.tokenExpiry && isTokenValid() ? Math.max(0, Math.floor((authRef.current.tokenExpiry - Date.now()) / 1000)) + ' seconds' : 'Expired'}</li>
-            <li>API endpoint: sh.dataspace.copernicus.eu/api/v1/statistics</li>
-          </ul>
-        </div>
-      )}
-
       <div style={styles.authSection}>
-        <h3>Copernicus Data Space Configuration</h3>
-        <div style={styles.info}>
-          <strong>OAuth2 Client Credentials Flow:</strong>
-          <ol style={{ margin: '10px 0', paddingLeft: '20px' }}>
-            <li>Register at <a href="https://dataspace.copernicus.eu/" target="_blank" rel="noopener noreferrer">dataspace.copernicus.eu</a></li>
-            <li>Create OAuth2 client (no refresh tokens in client credentials flow)</li>
-            <li>Alternative: Generate token via command line:
-              <pre style={{ backgroundColor: '#f5f5f5', padding: '10px', marginTop: '5px', fontSize: '11px', overflow: 'auto' }}>
-{`curl -d "grant_type=client_credentials&client_id=YOUR_CLIENT_ID&\\
-client_secret=YOUR_CLIENT_SECRET" \\
--H "Content-Type: application/x-www-form-urlencoded" \\
--X POST https://identity.dataspace.copernicus.eu/auth/realms/CDSE/\\
-protocol/openid-connect/token`}
-              </pre>
-            </li>
-          </ol>
-        </div>
+        <h3>Authentication</h3>
         <div style={styles.controls}>
           <div>
             <label style={styles.label}>Client ID</label>
             <input
               style={styles.input}
               type="text"
-              placeholder="Enter your OAuth2 Client ID"
+              placeholder="OAuth2 Client ID"
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
               disabled={authenticated}
@@ -1133,49 +563,27 @@ protocol/openid-connect/token`}
             <input
               style={styles.input}
               type="password"
-              placeholder="Enter your OAuth2 Client Secret"
+              placeholder="OAuth2 Client Secret"
               value={clientSecret}
               onChange={(e) => setClientSecret(e.target.value)}
               disabled={authenticated}
             />
           </div>
           <div>
-            <label style={styles.label}>Access Token (Manual Entry)</label>
+            <label style={styles.label}>Manual Token (if CORS blocked)</label>
             <input
               style={styles.input}
               type="text"
-              placeholder="Paste access token if CORS blocked"
+              placeholder="Paste access token"
               onChange={(e) => {
                 if (e.target.value) {
-                  authRef.current.accessToken = e.target.value;
-                  authRef.current.tokenExpiry = Date.now() + (540 * 1000); // 9 minutes
-                  authRef.current.lastAuthTime = Date.now();
+                  setAccessToken(e.target.value);
+                  setTokenExpiry(Date.now() + (540 * 1000));
                   setAuthenticated(true);
                 }
               }}
               disabled={authenticated}
             />
-          </div>
-          <div>
-            <label style={styles.label}>Max Cloud Coverage (%)</label>
-            <input
-              style={styles.input}
-              type="number"
-              min="0"
-              max="100"
-              value={cloudCoverage}
-              onChange={(e) => setCloudCoverage(parseInt(e.target.value))}
-            />
-          </div>
-          <div>
-            <label style={styles.label}>Debug Mode</label>
-            <input
-              type="checkbox"
-              checked={debugMode}
-              onChange={(e) => setDebugMode(e.target.checked)}
-              style={{ width: 'auto', marginTop: '8px' }}
-            />
-            <span style={{ marginLeft: '8px', fontSize: '14px' }}>Enable detailed API logging</span>
           </div>
         </div>
         <button
@@ -1186,16 +594,8 @@ protocol/openid-connect/token`}
           onClick={authenticateCDSE}
           disabled={authenticated}
         >
-          {authenticated ? 'Authenticated' : 'Authenticate with CDSE'}
+          {authenticated ? 'Authenticated' : 'Authenticate'}
         </button>
-        {authenticated && (
-          <button
-            style={{ ...styles.button, marginLeft: '10px' }}
-            onClick={reauthenticate}
-          >
-            Re-authenticate
-          </button>
-        )}
       </div>
 
       <div style={styles.controls}>
@@ -1224,10 +624,6 @@ protocol/openid-connect/token`}
           <TileLayer
             url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
             attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
-          />
-          <TileLayer
-            url="https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
-            attribution='Labels &copy; <a href="https://www.esri.com/">Esri</a>'
           />
           <FeatureGroup>
             <DrawControl
@@ -1261,7 +657,7 @@ protocol/openid-connect/token`}
         onClick={fetchSatelliteData}
         disabled={loading || selectedForests.length === 0 || !authenticated}
       >
-        {loading ? 'Processing Sentinel-2 Data...' : 'Analyze Sentinel-2 Archive (2023-Present)'}
+        {loading ? 'Processing...' : 'Analyze Summer Biomass'}
       </button>
 
       {selectedForests.length > 0 && (
@@ -1279,7 +675,6 @@ protocol/openid-connect/token`}
               <h3>Forest #{idx + 1}</h3>
               <p><strong>Type:</strong> {forest.type}</p>
               <p><strong>Area:</strong> {forest.area} hectares</p>
-              <p><strong>Data Source:</strong> Sentinel-2 MSI Level-2A</p>
             </div>
           ))}
         </div>
@@ -1287,59 +682,15 @@ protocol/openid-connect/token`}
 
       {loading && (
         <div style={styles.loading}>
-          <p>Processing Sentinel-2 imagery...</p>
+          <p>Processing satellite imagery...</p>
           <p style={{ fontSize: '14px', color: '#999' }}>{processingStatus}</p>
-          {apiStats.totalRequests > 0 && (
-            <div style={{ marginTop: '10px', fontSize: '13px' }}>
-              <p>API Requests: {apiStats.totalRequests}</p>
-              <p>Successful: {apiStats.successfulRequests}</p>
-              <p>Empty Responses: {apiStats.emptyResponses}</p>
-              <p>Errors: {apiStats.errors}</p>
-            </div>
-          )}
         </div>
       )}
 
       {biomassData.length > 0 && (
         <div style={styles.chartContainer}>
-          <h2>Historical Biomass Analysis</h2>
+          <h2>Summer Biomass Trends</h2>
           
-          <div style={styles.success}>
-            <strong>✅ Real Satellite Data Only:</strong> Displaying {biomassData.length} data points from Sentinel-2 imagery. 
-            {skippedDataCount > 0 && ` ${skippedDataCount} dates were skipped due to insufficient valid pixels or processing errors.`}
-          </div>
-          
-          <p style={{ fontSize: '14px', color: '#666', marginBottom: '20px' }}>
-            NDVI time series from Sentinel-2 MSI (20m statistical resolution).
-            Cloud-filtered scenes with less than {cloudCoverage}% cloud coverage.
-            Processed via Copernicus Data Space Statistical API.
-          </p>
-          
-          <div style={styles.controls}>
-            <div>
-              <label style={styles.label}>Growth Trend Start Date</label>
-              <input
-                style={styles.input}
-                type="date"
-                value={trendStartDate}
-                onChange={(e) => setTrendStartDate(e.target.value)}
-                min={biomassData[0]?.date}
-                max={biomassData[biomassData.length - 1]?.date}
-              />
-            </div>
-            <div>
-              <label style={styles.label}>Growth Trend End Date</label>
-              <input
-                style={styles.input}
-                type="date"
-                value={trendEndDate}
-                onChange={(e) => setTrendEndDate(e.target.value)}
-                min={biomassData[0]?.date}
-                max={biomassData[biomassData.length - 1]?.date}
-              />
-            </div>
-          </div>
-
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={biomassData}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -1348,184 +699,59 @@ protocol/openid-connect/token`}
                 tick={{ fontSize: 11 }}
                 angle={-45}
                 textAnchor="end"
-                height={100}
-                interval={Math.floor(biomassData.length / 20)}
+                height={80}
               />
-              <YAxis yAxisId="biomass" orientation="left" label={{ value: 'Biomass (tons/ha)', angle: -90, position: 'insideLeft' }} />
-              <YAxis yAxisId="ndvi" orientation="right" label={{ value: 'NDVI', angle: 90, position: 'insideRight' }} domain={[-0.2, 1]} />
-              <Tooltip
-                content={({ active, payload, label }) => {
-                  if (active && payload && payload.length) {
-                    const data = payload[0].payload;
-                    return (
-                      <div style={{
-                        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                        border: '1px solid #ccc',
-                        borderRadius: '4px',
-                        padding: '10px',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-                      }}>
-                        <p style={{ margin: '0 0 5px 0', fontWeight: 'bold' }}>{label}</p>
-                        {data.isWinter && (
-                          <p style={{ margin: '2px 0', fontSize: '12px', color: '#0066cc', fontWeight: 'bold' }}>
-                            ❄️ WINTER CONDITIONS
-                          </p>
-                        )}
-                        <p style={{ margin: '2px 0', fontSize: '12px', color: '#51cf66', fontWeight: 'bold' }}>
-                          ✅ REAL SATELLITE DATA
-                        </p>
-                        <p style={{ margin: '2px 0', fontSize: '12px' }}>
-                          NDVI: {data.ndvi.toFixed(3)}
-                        </p>
-                        <p style={{ margin: '2px 0', fontSize: '12px' }}>
-                          Biomass: {data.biomass.toFixed(1)} tons/ha
-                        </p>
-                        {data.biomassMean && (
-                          <p style={{ margin: '2px 0', fontSize: '12px', color: '#ff0000', fontWeight: 'bold' }}>
-                            Annual Mean: {data.biomassMean.toFixed(1)} tons/ha
-                          </p>
-                        )}
-                        <p style={{ margin: '2px 0', fontSize: '12px', color: '#666' }}>
-                          Cloud Cover: {data.cloudCover.toFixed(1)}%
-                        </p>
-                        <p style={{ margin: '2px 0', fontSize: '12px', color: '#666' }}>
-                          Valid Pixels: {(data.validPixelRatio * 100).toFixed(1)}%
-                        </p>
-                        <p style={{ margin: '2px 0', fontSize: '10px', color: '#999' }}>
-                          Source: Sentinel-2 Statistical API
-                        </p>
-                      </div>
-                    );
-                  }
-                  return null;
-                }}
+              <YAxis 
+                yAxisId="biomass" 
+                orientation="left" 
+                label={{ value: 'Biomass (tons/ha)', angle: -90, position: 'insideLeft' }} 
               />
+              <YAxis 
+                yAxisId="vi" 
+                orientation="right" 
+                label={{ value: 'Vegetation Index', angle: 90, position: 'insideRight' }} 
+                domain={[-1, 1]}
+              />
+              <Tooltip />
               <Legend />
               <Line
                 yAxisId="biomass"
                 type="monotone"
                 dataKey="biomass"
                 stroke="#82ca9d"
-                name="Scene Biomass"
-                strokeWidth={0}
-                dot={{ r: 4, fill: '#82ca9d' }}
+                name="Biomass"
+                strokeWidth={2}
+                dot={{ r: 4 }}
               />
               <Line
-                yAxisId="ndvi"
+                yAxisId="vi"
                 type="monotone"
-                dataKey="ndvi"
+                dataKey="vegetationIndex"
                 stroke="#8884d8"
-                name="Scene NDVI"
-                strokeWidth={0}
-                dot={{ r: 4, fill: '#8884d8' }}
-              />
-              <Line
-                yAxisId="biomass"
-                type="monotone"
-                dataKey="biomassMean"
-                stroke="#ff0000"
-                name="Annual Mean"
-                strokeWidth={3}
-                dot={false}
+                name="Vegetation Index"
+                strokeWidth={2}
+                dot={{ r: 4 }}
               />
             </LineChart>
           </ResponsiveContainer>
 
           <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
-            <h4>Analysis Summary</h4>
+            <h4>Technical Details</h4>
             <p style={{ fontSize: '14px', margin: '5px 0' }}>
-              Total Observations: {biomassData.length} cloud-free scenes with valid data
+              <strong>Algorithm:</strong> Vegetation Index = (Green - Red) / (Green + Red)
             </p>
             <p style={{ fontSize: '14px', margin: '5px 0' }}>
-              Data Source: Sentinel-2 Level-2A products via Statistical API
+              <strong>Biomass Estimation:</strong> Linear mapping from VI to species-specific biomass range
             </p>
             <p style={{ fontSize: '14px', margin: '5px 0' }}>
-              Skipped Scenes: {skippedDataCount} (insufficient valid pixels or API errors)
+              <strong>Data Points:</strong> {biomassData.length} summer observations
             </p>
             <p style={{ fontSize: '14px', margin: '5px 0' }}>
-              Analysis Period: {biomassData[0]?.year} - {biomassData[biomassData.length - 1]?.year}
-            </p>
-            <p style={{ fontSize: '14px', margin: '5px 0' }}>
-              Average NDVI: {(biomassData.reduce((sum, d) => sum + d.ndvi, 0) / biomassData.length).toFixed(3)}
-            </p>
-            <p style={{ fontSize: '14px', margin: '5px 0' }}>
-              Average Biomass: {(biomassData.reduce((sum, d) => sum + d.biomass, 0) / biomassData.length).toFixed(1)} tons/ha
-            </p>
-            <p style={{ fontSize: '14px', margin: '5px 0' }}>
-              Growth Trend: {(() => {
-                // Calculate yearly means for growth trend
-                const startDate = trendStartDate || biomassData[0]?.date;
-                const endDate = trendEndDate || biomassData[biomassData.length - 1]?.date;
-                
-                // Filter data based on date range
-                const filteredData = biomassData.filter(d => 
-                  d.date >= startDate && d.date <= endDate
-                );
-                
-                if (filteredData.length === 0) return 'No data in selected range';
-                
-                // Group by year and calculate means
-                const yearlyMeans = {};
-                filteredData.forEach(d => {
-                  if (!yearlyMeans[d.year]) {
-                    yearlyMeans[d.year] = { sum: 0, count: 0 };
-                  }
-                  yearlyMeans[d.year].sum += d.biomass;
-                  yearlyMeans[d.year].count++;
-                });
-                
-                // Convert to array and sort by year
-                const years = Object.keys(yearlyMeans).sort();
-                if (years.length < 2) return 'Insufficient data for trend';
-                
-                // Calculate mean for first and last year
-                const firstYearMean = yearlyMeans[years[0]].sum / yearlyMeans[years[0]].count;
-                const lastYearMean = yearlyMeans[years[years.length - 1]].sum / yearlyMeans[years[years.length - 1]].count;
-                
-                // Calculate percentage change
-                const trendPercent = ((lastYearMean - firstYearMean) / firstYearMean * 100).toFixed(1);
-                
-                return `${trendPercent}% (${years[0]}-${years[years.length - 1]}, from ${firstYearMean.toFixed(1)} to ${lastYearMean.toFixed(1)} tons/ha)`;
-              })()}
+              <strong>Average Biomass:</strong> {(biomassData.reduce((sum, d) => sum + d.biomass, 0) / biomassData.length).toFixed(1)} tons/ha
             </p>
           </div>
         </div>
       )}
-
-      <div style={styles.info}>
-        <h4>Technical Implementation Details</h4>
-        <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
-          <li><strong>✅ REAL DATA ONLY</strong> - No simulated or estimated values. Only actual satellite measurements displayed.</li>
-          <li><strong>✅ RESOLUTION FIX</strong> - Using 20m resolution (native Sentinel-2) to avoid API limits</li>
-          <li><strong>✅ SINGLE DAY SEARCH</strong> - Search and aggregation use exact acquisition date to prevent resolution multiplication</li>
-          <li><strong>✅ WINTER HANDLING</strong> - Adaptive SCL masking for winter months (Dec-Mar)</li>
-          <li><strong>✅ RATE LIMIT HANDLING</strong> - Exponential backoff with 10s minimum delay between requests</li>
-          <li><strong>API Configuration:</strong>
-            <ul>
-              <li>Statistical API Resolution: 20m x 20m (Sentinel-2 native resolution)</li>
-              <li>Aggregation Interval: P1D (single day)</li>
-              <li>Collection: sentinel-2-l2a</li>
-              <li>Mosaicking: leastCC (least cloud coverage)</li>
-            </ul>
-          </li>
-          <li><strong>Processing Details:</strong>
-            <ul>
-              <li>NDVI Calculation: (B08 - B04) / (B08 + B04)</li>
-              <li>Valid Pixel Threshold: 5% (winter) / 10% (other seasons)</li>
-              <li>Rate Limiting: 10 second minimum delay between requests</li>
-              <li>Batch Size: 1 product at a time</li>
-            </ul>
-          </li>
-          <li><strong>Data Quality:</strong>
-            <ul>
-              <li>Only scenes with sufficient valid pixels included</li>
-              <li>Cloud coverage filter applied at catalog search</li>
-              <li>SCL-based pixel masking in evalscript</li>
-              <li>Winter-aware processing for Finnish conditions</li>
-            </ul>
-          </li>
-        </ul>
-      </div>
     </div>
   );
 };
