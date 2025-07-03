@@ -367,6 +367,11 @@ const ForestBiomassApp = () => {
       return;
     }
 
+    if (selectedForestIndex >= selectedForests.length) {
+      setError('Invalid forest selection');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setBiomassData([]);
@@ -463,11 +468,10 @@ const ForestBiomassApp = () => {
   }, [forestType]);
 
   const handleDeleted = useCallback((e) => {
-    setSelectedForests(forests => forests.slice(0, -1));
-    if (selectedForestIndex >= selectedForests.length - 1) {
-      setSelectedForestIndex(Math.max(0, selectedForests.length - 2));
-    }
-  }, [selectedForestIndex, selectedForests.length]);
+    setSelectedForests([]);
+    setSelectedForestIndex(0);
+    setBiomassData([]);
+  }, []);
 
   // FIX: Handle forest type change for selected polygon
   const handleForestTypeChange = (newType) => {
@@ -492,6 +496,7 @@ const ForestBiomassApp = () => {
   // Export data to CSV
   const exportToCSV = () => {
     if (biomassData.length === 0) return;
+    if (selectedForests.length === 0 || selectedForestIndex >= selectedForests.length) return;
 
     // CSV header
     const headers = [
