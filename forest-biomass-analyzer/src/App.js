@@ -212,6 +212,24 @@ const ForestBiomassApp = () => {
     return Math.max(0, biomass);
   };
 
+  // Calculate rolling average with specified window size
+  const calculateRollingAverage = (data, key, windowSize) => {
+    return data.map((item, index) => {
+      // Calculate start index for rolling window
+      const startIndex = Math.max(0, index - windowSize + 1);
+      const windowData = data.slice(startIndex, index + 1);
+      
+      // Calculate average for the window
+      const sum = windowData.reduce((acc, d) => acc + d[key], 0);
+      const average = sum / windowData.length;
+      
+      return {
+        ...item,
+        [`${key}RollingAvg`]: average
+      };
+    });
+  };
+
   // Process satellite image for a specific date with proper NDVI calculation
   const processSatelliteImage = async (polygon, date) => {
     const coords = polygon.coords.map(coord => [coord[1], coord[0]]); // lon,lat
@@ -358,7 +376,7 @@ const ForestBiomassApp = () => {
       const selectedForest = selectedForests[selectedForestIndex];
       const currentYear = new Date().getFullYear();
       const results = [];
-      const startYear = currentYear - 9;
+      const startYear = currentYear - 10;
       
       // Process last 10 years of summer data
       for (let year = startYear; year <= currentYear; year++) {
@@ -401,7 +419,11 @@ const ForestBiomassApp = () => {
       // Sort by date
       results.sort((a, b) => new Date(a.date) - new Date(b.date));
       
-      setBiomassData(results);
+      // Calculate rolling averages (3 data points = 1 year of data)
+      const resultsWithRollingAvg = calculateRollingAverage(results, 'biomass', 3);
+      const finalResults = calculateRollingAverage(resultsWithRollingAvg, 'ndvi', 3);
+      
+      setBiomassData(finalResults);
       setProcessingStatus('');
     } catch (err) {
       setError(`Processing error: ${err.message}`);
@@ -445,6 +467,94 @@ const ForestBiomassApp = () => {
       setSelectedForestIndex(Math.max(0, selectedForests.length - 2));
     }
   }, [selectedForestIndex, selectedForests.length]);
+
+  // Export data to CSV
+  const exportToCSV = () => {
+    if (biomassData.length === 0) return;
+
+    // CSV header
+    const headers = [
+      'Date',
+      'Year',
+      'Month',
+      'Forest Age (years)',
+      'NDVI',
+      'NDVI Rolling Avg',
+      'Biomass (tons/ha)',
+      'Biomass Rolling Avg (tons/ha)',
+      'Forest Type',
+      'Forest Area (ha)'
+    ];
+
+    // Convert data to CSV rows
+    const csvRows = biomassData.map(row => [
+      row.date,
+      row.year,
+      row.month,
+      row.forestAge,
+      row.ndvi.toFixed(4),
+      row.ndviRollingAvg.toFixed(4),
+      row.biomass.toFixed(2),
+      row.biomassRollingAvg.toFixed(2),
+      selectedForests[selectedForestIndex].type,
+      selectedForests[selectedForestIndex].area
+    ]);
+
+    // Combine headers and rows
+    const csvContent = [
+      headers.join(','),
+      ...csvRows.map(row => row.join(','))
+    ].join('\n');
+
+    // Create blob and download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    const filename = `forest_biomass_${selectedForests[selectedForestIndex].type}_${new Date().toISOString().slice(0, 10)}.csv`;
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Export raw data (NDVI, Biomass, Year only)
+  const exportRawData = () => {
+    if (biomassData.length === 0) return;
+
+    // Minimal headers
+    const headers = ['Year', 'NDVI', 'Biomass (tons/ha)'];
+
+    // Extract only required fields
+    const csvRows = biomassData.map(row => [
+      row.year,
+      row.ndvi.toFixed(4),
+      row.biomass.toFixed(2)
+    ]);
+
+    // Generate CSV content
+    const csvContent = [
+      headers.join(','),
+      ...csvRows.map(row => row.join(','))
+    ].join('\n');
+
+    // Create download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    const filename = `forest_biomass_raw_${selectedForests[selectedForestIndex].type}_${new Date().toISOString().slice(0, 10)}.csv`;
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const styles = {
     container: {
@@ -563,6 +673,31 @@ const ForestBiomassApp = () => {
       backgroundColor: '#f8f9fa',
       borderRadius: '4px',
       fontSize: '14px'
+    },
+    exportButton: {
+      padding: '10px 20px',
+      backgroundColor: '#28a745',
+      color: 'white',
+      border: 'none',
+      borderRadius: '4px',
+      fontSize: '16px',
+      cursor: 'pointer',
+      marginLeft: '10px'
+    },
+    exportRawButton: {
+      padding: '10px 20px',
+      backgroundColor: '#17a2b8',
+      color: 'white',
+      border: 'none',
+      borderRadius: '4px',
+      fontSize: '16px',
+      cursor: 'pointer'
+    },
+    buttonContainer: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+      marginBottom: '20px'
     }
   };
 
@@ -578,6 +713,7 @@ const ForestBiomassApp = () => {
           <li>✅ Species-specific parameters: Different growth rates and max biomass</li>
           <li>✅ Vegetation filtering: Uses SCL band to isolate forest pixels</li>
           <li>✅ Realistic biomass progression: Shows expected growth over time</li>
+          <li>✅ Rolling average trend lines: 1-year (3-point) moving average for growth trend analysis</li>
         </ul>
       </div>
 
@@ -744,7 +880,23 @@ const ForestBiomassApp = () => {
 
       {biomassData.length > 0 && (
         <div style={styles.chartContainer}>
-          <h2>Biomass Growth Trends (Showing Realistic Progression)</h2>
+          <div style={styles.buttonContainer}>
+            <h2 style={{ margin: 0 }}>Biomass Growth Trends with 1-Year Rolling Average</h2>
+            <button
+              style={styles.exportRawButton}
+              onClick={exportRawData}
+              title="Export raw data (Year, NDVI, Biomass)"
+            >
+              Raw Data
+            </button>
+            <button
+              style={styles.exportButton}
+              onClick={exportToCSV}
+              title="Export complete data to CSV"
+            >
+              Full Export
+            </button>
+          </div>
           
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={biomassData}>
@@ -771,6 +923,8 @@ const ForestBiomassApp = () => {
                 formatter={(value, name) => {
                   if (name === 'Biomass') return [`${value.toFixed(1)} t/ha`, name];
                   if (name === 'NDVI') return [value.toFixed(3), name];
+                  if (name === 'Biomass Trend') return [`${value.toFixed(1)} t/ha`, name];
+                  if (name === 'NDVI Trend') return [value.toFixed(3), name];
                   return [value, name];
                 }}
                 labelFormatter={(label) => {
@@ -779,6 +933,7 @@ const ForestBiomassApp = () => {
                 }}
               />
               <Legend />
+              
               <Line
                 yAxisId="biomass"
                 type="monotone"
@@ -797,6 +952,28 @@ const ForestBiomassApp = () => {
                 strokeWidth={2}
                 dot={{ r: 4 }}
               />
+              
+              {/* Rolling average trend lines */}
+              <Line
+                yAxisId="biomass"
+                type="monotone"
+                dataKey="biomassRollingAvg"
+                stroke="#2ca02c"
+                name="Biomass Trend"
+                strokeWidth={3}
+                strokeDasharray="5 5"
+                dot={false}
+              />
+              <Line
+                yAxisId="ndvi"
+                type="monotone"
+                dataKey="ndviRollingAvg"
+                stroke="#1f77b4"
+                name="NDVI Trend"
+                strokeWidth={3}
+                strokeDasharray="5 5"
+                dot={false}
+              />
             </LineChart>
           </ResponsiveContainer>
 
@@ -808,6 +985,9 @@ const ForestBiomassApp = () => {
             <p><strong>Data Points:</strong> {biomassData.length} observations over {biomassData[biomassData.length-1].yearsFromStart + 1} years</p>
             <p><strong>Growth Rate:</strong> {((biomassData[biomassData.length-1].biomass - biomassData[0].biomass) / biomassData[0].biomass * 100).toFixed(1)}% total increase</p>
             <p><strong>Annual Growth:</strong> {((biomassData[biomassData.length-1].biomass - biomassData[0].biomass) / (biomassData[biomassData.length-1].yearsFromStart)).toFixed(1)} tons/ha/year</p>
+            <p><strong>Rolling Average Window:</strong> 3 data points (1 year of measurements)</p>
+            <p><strong>Latest Biomass Trend:</strong> {biomassData[biomassData.length-1].biomassRollingAvg ? biomassData[biomassData.length-1].biomassRollingAvg.toFixed(1) : 'N/A'} tons/ha</p>
+            <p><strong>Latest NDVI Trend:</strong> {biomassData[biomassData.length-1].ndviRollingAvg ? biomassData[biomassData.length-1].ndviRollingAvg.toFixed(3) : 'N/A'}</p>
           </div>
         </div>
       )}
