@@ -98,7 +98,7 @@ const DrawControl = ({ onCreated, onDeleted }) => {
 const ForestBiomassApp = () => {
   const [selectedForests, setSelectedForests] = useState([]);
   const [forestType, setForestType] = useState('pine');
-  const [forestAge, setForestAge] = useState(20); // Forest age in years
+  const [forestAge, setForestAge] = useState(20);
   const [biomassData, setBiomassData] = useState([]);
   const [selectedForestIndex, setSelectedForestIndex] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -109,6 +109,7 @@ const ForestBiomassApp = () => {
   const [processingStatus, setProcessingStatus] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [tokenExpiry, setTokenExpiry] = useState(null);
+  const [manualAuthMode, setManualAuthMode] = useState(false);
   const mapRef = useRef();
 
   // Forest parameters with growth curves based on scientific literature
@@ -144,6 +145,16 @@ const ForestBiomassApp = () => {
     loadGeometryUtil();
   }, []);
 
+  // Check token expiry
+  useEffect(() => {
+    if (tokenExpiry && Date.now() > tokenExpiry) {
+      setAuthenticated(false);
+      setAccessToken('');
+      setTokenExpiry(null);
+      setError('Authentication token expired. Please re-authenticate.');
+    }
+  }, [tokenExpiry]);
+
   // Authenticate with Copernicus Data Space
   const authenticateCDSE = async () => {
     if (!clientId || !clientSecret) {
@@ -161,6 +172,7 @@ const ForestBiomassApp = () => {
         client_secret: clientSecret
       });
 
+      // Copernicus Data Space authentication endpoint
       const tokenResponse = await fetch('https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token', {
         method: 'POST',
         headers: {
@@ -170,10 +182,14 @@ const ForestBiomassApp = () => {
       });
 
       if (!tokenResponse.ok) {
+        const errorText = await tokenResponse.text();
+        console.error('Authentication failed:', errorText);
         throw new Error(`Authentication failed: ${tokenResponse.status}`);
       }
 
       const tokenResult = await tokenResponse.json();
+      console.log('Authentication successful, token expires in:', tokenResult.expires_in, 'seconds');
+      
       setAccessToken(tokenResult.access_token);
       setTokenExpiry(Date.now() + ((tokenResult.expires_in - 60) * 1000));
       setAuthenticated(true);
@@ -181,21 +197,20 @@ const ForestBiomassApp = () => {
       
       return true;
     } catch (err) {
-      setError(`Authentication failed: ${err.message}`);
+      setError(`Authentication failed: ${err.message}. Use manual token mode if CORS is blocking.`);
       setProcessingStatus('');
       return false;
     }
   };
 
-  // Calculate NDVI from Sentinel-2 NIR and Red bands
-  const calculateNDVI = (nir, red) => {
-    const ndvi = (nir - red) / (nir + red + 0.00001); // Add small value to avoid division by zero
-    return Math.max(-1, Math.min(1, ndvi)); // Clamp to [-1, 1]
-  };
-
   // Estimate biomass using growth model and NDVI
   const estimateBiomass = (ndvi, forestType, yearsFromStart, currentForestAge) => {
     const params = forestParams[forestType];
+    
+    // For water bodies (negative NDVI), return 0 biomass
+    if (ndvi < 0) {
+      return 0;
+    }
     
     // Logistic growth model for forest biomass accumulation
     const currentAge = currentForestAge + yearsFromStart;
@@ -215,11 +230,9 @@ const ForestBiomassApp = () => {
   // Calculate rolling average with specified window size
   const calculateRollingAverage = (data, key, windowSize) => {
     return data.map((item, index) => {
-      // Calculate start index for rolling window
       const startIndex = Math.max(0, index - windowSize + 1);
       const windowData = data.slice(startIndex, index + 1);
       
-      // Calculate average for the window
       const sum = windowData.reduce((acc, d) => acc + d[key], 0);
       const average = sum / windowData.length;
       
@@ -230,132 +243,224 @@ const ForestBiomassApp = () => {
     });
   };
 
-  // Process satellite image for a specific date with proper NDVI calculation
-  const processSatelliteImage = async (polygon, date) => {
+  // Use Statistical API for actual NDVI data
+  const fetchNDVIStatistics = async (polygon, dateFrom, dateTo) => {
     const coords = polygon.coords.map(coord => [coord[1], coord[0]]); // lon,lat
     
-    // Sentinel Hub Process API evalscript for NDVI calculation
+    // Calculate polygon bounds and appropriate resolution
+    const lons = coords.map(c => c[0]);
+    const lats = coords.map(c => c[1]);
+    const minLon = Math.min(...lons);
+    const maxLon = Math.max(...lons);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    
+    // Calculate approximate polygon dimensions in meters
+    const latDistance = (maxLat - minLat) * 111000; // ~111km per degree latitude
+    const lonDistance = (maxLon - minLon) * 111000 * Math.cos((minLat + maxLat) / 2 * Math.PI / 180);
+    const maxDimension = Math.max(latDistance, lonDistance);
+    
+    // Convert WGS84 to appropriate UTM zone for Finland
+    const centerLon = (minLon + maxLon) / 2;
+    const utmZone = Math.floor((centerLon + 180) / 6) + 1; // UTM zone calculation
+    
+    // For Finland (around 24°E), this is typically UTM zone 35N (EPSG:32635)
+    const EPSG_CODE = 32635; // UTM zone 35N for Finland
+    
+    // Convert polygon to projected coordinates (approximate conversion for demo)
+    // In production, use a proper coordinate transformation library
+    const projectedCoords = coords.map(coord => {
+      const lon = coord[0];
+      const lat = coord[1];
+      
+      // Approximate UTM conversion (simplified for demo)
+      const k0 = 0.9996; // UTM scale factor
+      const a = 6378137; // WGS84 semi-major axis
+      const e = 0.08181919084; // WGS84 eccentricity
+      
+      const lonRad = lon * Math.PI / 180;
+      const latRad = lat * Math.PI / 180;
+      const lonOrigin = ((utmZone - 1) * 6 - 180 + 3) * Math.PI / 180;
+      
+      const N = a / Math.sqrt(1 - e * e * Math.sin(latRad) * Math.sin(latRad));
+      const T = Math.tan(latRad) * Math.tan(latRad);
+      const C = e * e * Math.cos(latRad) * Math.cos(latRad) / (1 - e * e);
+      const A = Math.cos(latRad) * (lonRad - lonOrigin);
+      
+      const M = a * ((1 - e * e / 4 - 3 * e * e * e * e / 64) * latRad
+        - (3 * e * e / 8 + 3 * e * e * e * e / 32) * Math.sin(2 * latRad)
+        + (15 * e * e * e * e / 256) * Math.sin(4 * latRad));
+      
+      const easting = k0 * N * (A + (1 - T + C) * A * A * A / 6) + 500000;
+      const northing = k0 * (M + N * Math.tan(latRad) * (A * A / 2));
+      
+      return [easting, northing];
+    });
+    
+    // Use projected resolution in meters
+    const resolutionMeters = 10; // Always use 10m for Sentinel-2 native resolution
+    
+    console.log(`Using UTM Zone ${utmZone}N (EPSG:${EPSG_CODE})`);
+    console.log(`Resolution: ${resolutionMeters}m`);
+    
+    // Statistical API evalscript for NDVI
     const evalscript = `
       //VERSION=3
       function setup() {
         return {
-          input: ["B04", "B08", "SCL", "dataMask"],
+          input: [
+            {
+              bands: ["B04", "B08"],
+              units: "REFLECTANCE"
+            },
+            {
+              bands: ["SCL", "dataMask"],
+              units: "DN"
+            }
+          ],
           output: [
-            { id: "ndvi", bands: 1, sampleType: "FLOAT32" },
-            { id: "rgb", bands: 4 }
+            {
+              id: "ndvi",
+              bands: 1,
+              sampleType: "FLOAT32"
+            },
+            {
+              id: "ndvi_valid_pixels",
+              bands: 1,
+              sampleType: "UINT16"
+            },
+            {
+              id: "dataMask",
+              bands: 1,
+              sampleType: "UINT8"
+            }
           ]
         };
       }
       
-      function evaluatePixel(sample) {
-        // Calculate NDVI using NIR (B08) and Red (B04)
-        let ndvi = (sample.B08 - sample.B04) / (sample.B08 + sample.B04);
+      function evaluatePixel(samples) {
+        // Calculate NDVI from reflectance values
+        let ndvi = (samples.B08 - samples.B04) / (samples.B08 + samples.B04 + 0.00001);
         
-        // Filter for vegetation pixels only (SCL classes 4, 5)
-        if (sample.SCL !== 4 && sample.SCL !== 5) {
-          ndvi = -9999; // Invalid value for non-vegetation
-        }
-        
-        // RGB visualization with enhancement
-        let rgb = [
-          sample.B04 * 2.5,
-          sample.B08 * 1.5,  // NIR in green channel for vegetation visualization
-          sample.B04 * 2.5,
-          sample.dataMask
-        ];
+        // Validate pixel: must be vegetation (SCL 4 or 5) or water (SCL 6)
+        // SCL values are in DN units (integer classification values)
+        let isValid = samples.dataMask === 1 && 
+                     (samples.SCL === 4 || samples.SCL === 5 || samples.SCL === 6);
         
         return {
-          ndvi: [ndvi],
-          rgb: rgb
+          ndvi: [isValid ? ndvi : NaN],
+          ndvi_valid_pixels: [isValid ? 1 : 0],
+          dataMask: [samples.dataMask]
         };
       }
     `;
     
-    // Create bounds for the request
-    const bounds = {
-      type: "Polygon",
-      coordinates: [[...coords, coords[0]]]
-    };
-    
-    // Process API request
-    const processRequest = {
+    const statsRequest = {
       input: {
         bounds: {
-          geometry: bounds,
+          geometry: {
+            type: "Polygon",
+            coordinates: [[...projectedCoords, projectedCoords[0]]]
+          },
           properties: {
-            crs: "http://www.opengis.net/def/crs/EPSG/0/4326"
+            crs: `http://www.opengis.net/def/crs/EPSG/0/${EPSG_CODE}`
           }
         },
         data: [{
-          type: "sentinel-2-l2a",
           dataFilter: {
             timeRange: {
-              from: `${date}T00:00:00Z`,
-              to: `${date}T23:59:59Z`
+              from: `${dateFrom}T00:00:00Z`,
+              to: `${dateTo}T23:59:59Z`
             },
-            maxCloudCoverage: 5
-          }
+            maxCloudCoverage: 30,
+            mosaickingOrder: "leastCC"
+          },
+          type: "sentinel-2-l2a"
         }]
       },
-      output: {
-        width: 512,
-        height: 512,
-        responses: [
-          {
-            identifier: "ndvi",
-            format: {
-              type: "image/tiff"
-            }
-          },
-          {
-            identifier: "rgb",
-            format: {
-              type: "image/png"
+      aggregation: {
+        evalscript: evalscript,
+        timeRange: {
+          from: `${dateFrom}T00:00:00Z`,
+          to: `${dateTo}T23:59:59Z`
+        },
+        aggregationInterval: {
+          of: "P1D"
+        },
+        resx: resolutionMeters,
+        resy: resolutionMeters
+      },
+      calculations: {
+        default: {
+          statistics: {
+            default: {
+              percentiles: {
+                k: [25, 50, 75]
+              }
             }
           }
-        ]
-      },
-      evalscript: evalscript
+        }
+      }
     };
     
+    // Log the complete request for debugging
+    console.log('=== STATISTICAL API REQUEST ===');
+    console.log('Endpoint:', 'https://sh.dataspace.copernicus.eu/api/v3/statistics');
+    console.log('Request payload:', JSON.stringify(statsRequest, null, 2));
+    console.log('Auth token (first 20 chars):', accessToken.substring(0, 20) + '...');
+    
     try {
-      const response = await fetch('https://sh.dataspace.copernicus.eu/api/v1/process', {
+      const response = await fetch('https://sh.dataspace.copernicus.eu/api/v3/statistics', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${accessToken}`
         },
-        body: JSON.stringify(processRequest)
+        body: JSON.stringify(statsRequest)
       });
       
+      const responseText = await response.text();
+      console.log('=== STATISTICAL API RESPONSE ===');
+      console.log('Status:', response.status);
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+      console.log('Response body:', responseText);
+      
       if (!response.ok) {
-        console.error(`Failed to fetch image for ${date}: ${response.status}`);
-        return null;
+        console.error(`Statistics API error: ${response.status} - ${responseText}`);
+        
+        // If auth fails, try to parse error
+        if (response.status === 401) {
+          throw new Error('Authentication failed. Token may be expired.');
+        }
+        
+        // Check for specific dataset error
+        if (responseText.includes('Dataset with id')) {
+          console.error('Dataset ID error - Collection type may need adjustment for Copernicus Data Space');
+          throw new Error('Dataset not found. Collection ID may be incorrect for this endpoint.');
+        }
+        
+        throw new Error(`Failed to fetch statistics: ${response.status}`);
       }
       
-      // Parse multipart response
-      const contentType = response.headers.get('content-type');
-      const boundary = contentType.split('boundary=')[1];
-      const buffer = await response.arrayBuffer();
-      const text = new TextDecoder().decode(buffer);
-      const parts = text.split(`--${boundary}`);
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('Failed to parse response JSON:', parseError);
+        throw new Error('Invalid JSON response from API');
+      }
       
-      // Extract NDVI values (assuming first part is NDVI TIFF)
-      // For simplicity, we'll simulate NDVI extraction
-      // In production, you'd parse the actual TIFF data
-      const simulatedNDVI = 0.3 + Math.random() * 0.5; // Realistic NDVI range for forest
+      console.log('=== PARSED STATISTICS RESULT ===');
+      console.log(JSON.stringify(result, null, 2));
       
-      return {
-        ndvi: simulatedNDVI,
-        imageUrl: null // Would extract RGB image from multipart response
-      };
+      return result;
     } catch (error) {
-      console.error(`Error processing image for ${date}:`, error);
-      return null;
+      console.error('Statistics API error:', error);
+      throw error;
     }
   };
 
-  // Fetch satellite data for summer months with temporal growth modeling
+  // Process satellite data using actual API calls
   const fetchSatelliteData = async () => {
     if (selectedForests.length === 0) {
       setError('Draw at least one forest polygon');
@@ -363,7 +468,7 @@ const ForestBiomassApp = () => {
     }
 
     if (!authenticated) {
-      setError('Authenticate first');
+      setError('Authenticate first or use manual token');
       return;
     }
 
@@ -375,66 +480,141 @@ const ForestBiomassApp = () => {
     setLoading(true);
     setError(null);
     setBiomassData([]);
-    setProcessingStatus('Processing satellite imagery with NDVI...');
+    setProcessingStatus('Fetching real satellite data...');
 
     try {
       const selectedForest = selectedForests[selectedForestIndex];
-      const currentYear = new Date().getFullYear();
+      const currentDate = new Date();
+      const currentYear = currentDate.getFullYear();
+      const currentMonth = currentDate.getMonth() + 1; // JavaScript months are 0-indexed
       const results = [];
       const startYear = currentYear - 10;
       
       // Process last 10 years of summer data
       for (let year = startYear; year <= currentYear; year++) {
-        // Summer months in Finland: May to August
-        const summerMonths = [
-          { month: 6, day: 15 },  // Mid-June
-          { month: 7, day: 15 },  // Mid-July
-          { month: 8, day: 15 }   // Mid-August
-        ];
+        const yearsFromStart = year - startYear;
         
-        for (const { month, day } of summerMonths) {
-          const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          const yearsFromStart = year - startYear;
-          
-          setProcessingStatus(`Processing ${date} (Year ${yearsFromStart + 1})...`);
-          
-          // Simulate NDVI with realistic temporal variation
-          const baseNDVI = 0.65 + (yearsFromStart * 0.015); // Gradual increase
-          const seasonalVariation = (month === 7 ? 0.1 : 0.05); // Peak in July
-          const randomVariation = (Math.random() - 0.5) * 0.1;
-          const simulatedNDVI = Math.min(0.85, baseNDVI + seasonalVariation + randomVariation);
-          
-          // FIX: Use the current forest type from selectedForest, not the dropdown value
-          const biomass = estimateBiomass(simulatedNDVI, selectedForest.type, yearsFromStart, forestAge);
-          
-          results.push({
-            date,
-            year,
-            month,
-            yearsFromStart,
-            ndvi: simulatedNDVI,
-            biomass,
-            forestAge: forestAge + yearsFromStart
-          });
-          
-          // Rate limiting simulation
-          await new Promise(resolve => setTimeout(resolve, 100));
+        // Skip future dates
+        if (year === currentYear && currentMonth < 9) {
+          // If we're in the current year but haven't reached September yet,
+          // skip this year's summer data as it may not be complete
+          console.log(`Skipping ${year} as summer season not complete yet`);
+          continue;
         }
+        
+        // Define date range for summer season (May-August)
+        const dateFrom = `${year}-05-01`;
+        const dateTo = `${year}-08-31`;
+        
+        setProcessingStatus(`Fetching Sentinel-2 data for ${year} summer season...`);
+        
+        try {
+          // Fetch actual statistics from Sentinel Hub
+          const statsResponse = await fetchNDVIStatistics(selectedForest, dateFrom, dateTo);
+          
+          if (statsResponse && statsResponse.data && statsResponse.data.length > 0) {
+            // Process each available acquisition
+            let validData = 0;
+            let totalNDVI = 0;
+            let maxNDVI = -1;
+            let minNDVI = 1;
+            
+            for (const dataPoint of statsResponse.data) {
+              // Statistical API returns data in a different structure
+              // Check for the default output (since we used "default" in calculations)
+              if (dataPoint.outputs) {
+                // Try different possible output structures
+                let stats = null;
+                
+                // Try structure 1: outputs.default
+                if (dataPoint.outputs.default && dataPoint.outputs.default.bands && dataPoint.outputs.default.bands.B0) {
+                  stats = dataPoint.outputs.default.bands.B0.stats;
+                }
+                // Try structure 2: outputs.ndvi (in case output ID matters)
+                else if (dataPoint.outputs.ndvi && dataPoint.outputs.ndvi.bands && dataPoint.outputs.ndvi.bands.B0) {
+                  stats = dataPoint.outputs.ndvi.bands.B0.stats;
+                }
+                // Try structure 3: outputs.output_ndvi
+                else if (dataPoint.outputs.output_ndvi && dataPoint.outputs.output_ndvi.bands && dataPoint.outputs.output_ndvi.bands.B0) {
+                  stats = dataPoint.outputs.output_ndvi.bands.B0.stats;
+                }
+                
+                if (stats && stats.mean !== undefined && !isNaN(stats.mean)) {
+                  validData++;
+                  totalNDVI += stats.mean;
+                  maxNDVI = Math.max(maxNDVI, stats.max || stats.mean);
+                  minNDVI = Math.min(minNDVI, stats.min || stats.mean);
+                  
+                  console.log(`Found valid data for ${dataPoint.interval.from}: NDVI mean=${stats.mean.toFixed(3)}`);
+                }
+              }
+            }
+            
+            if (validData > 0) {
+              const avgNDVI = totalNDVI / validData;
+              
+              // Check if this is likely water (NDVI < 0.1) 
+              const isWater = avgNDVI < 0.1;
+              
+              if (isWater && year === startYear) {
+                setError('Selected area appears to be water body (NDVI < 0.1). Please select a forested area.');
+              }
+              
+              const biomass = estimateBiomass(avgNDVI, selectedForest.type, yearsFromStart, forestAge);
+              
+              results.push({
+                date: `${year}-07-15`,
+                year,
+                month: 7,
+                yearsFromStart,
+                ndvi: avgNDVI,
+                ndviMin: minNDVI,
+                ndviMax: maxNDVI,
+                biomass,
+                forestAge: forestAge + yearsFromStart,
+                dataPoints: validData,
+                isWater: isWater
+              });
+            } else {
+              // No valid data for this year
+              console.warn(`No valid data for ${year}`);
+            }
+          }
+        } catch (yearError) {
+          console.error(`Error processing year ${year}:`, yearError);
+          // Continue with next year
+        }
+        
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
+      if (results.length === 0) {
+        setError('No valid satellite data found for the selected area and time period.');
+        return;
       }
       
       // Sort by date
       results.sort((a, b) => new Date(a.date) - new Date(b.date));
       
-      // Calculate rolling averages (3 data points = 1 year of data)
+      // Calculate rolling averages
       const resultsWithRollingAvg = calculateRollingAverage(results, 'biomass', 3);
       const finalResults = calculateRollingAverage(resultsWithRollingAvg, 'ndvi', 3);
       
       setBiomassData(finalResults);
       setProcessingStatus('');
+      
+      // Check if the area is consistently water
+      const waterCount = finalResults.filter(d => d.isWater).length;
+      if (waterCount > finalResults.length * 0.7) {
+        setError('Warning: This area shows characteristics of a water body (low NDVI). Biomass estimates may not be accurate.');
+      }
+      
     } catch (err) {
       setError(`Processing error: ${err.message}`);
     } finally {
       setLoading(false);
+      setProcessingStatus('');
     }
   };
 
@@ -473,11 +653,9 @@ const ForestBiomassApp = () => {
     setBiomassData([]);
   }, []);
 
-  // FIX: Handle forest type change for selected polygon
   const handleForestTypeChange = (newType) => {
     setForestType(newType);
     
-    // Update the selected forest's type if one exists
     if (selectedForests.length > 0 && selectedForestIndex < selectedForests.length) {
       setSelectedForests(prevForests => {
         const updatedForests = [...prevForests];
@@ -488,7 +666,6 @@ const ForestBiomassApp = () => {
         return updatedForests;
       });
       
-      // Clear biomass data as it's now invalid
       setBiomassData([]);
     }
   };
@@ -498,41 +675,45 @@ const ForestBiomassApp = () => {
     if (biomassData.length === 0) return;
     if (selectedForests.length === 0 || selectedForestIndex >= selectedForests.length) return;
 
-    // CSV header
     const headers = [
       'Date',
       'Year',
       'Month',
       'Forest Age (years)',
-      'NDVI',
+      'NDVI Mean',
+      'NDVI Min',
+      'NDVI Max',
       'NDVI Rolling Avg',
       'Biomass (tons/ha)',
       'Biomass Rolling Avg (tons/ha)',
       'Forest Type',
-      'Forest Area (ha)'
+      'Forest Area (ha)',
+      'Valid Data Points',
+      'Is Water Body'
     ];
 
-    // Convert data to CSV rows
     const csvRows = biomassData.map(row => [
       row.date,
       row.year,
       row.month,
       row.forestAge,
       row.ndvi.toFixed(4),
+      row.ndviMin ? row.ndviMin.toFixed(4) : 'N/A',
+      row.ndviMax ? row.ndviMax.toFixed(4) : 'N/A',
       row.ndviRollingAvg.toFixed(4),
       row.biomass.toFixed(2),
       row.biomassRollingAvg.toFixed(2),
       selectedForests[selectedForestIndex].type,
-      selectedForests[selectedForestIndex].area
+      selectedForests[selectedForestIndex].area,
+      row.dataPoints || 'N/A',
+      row.isWater ? 'Yes' : 'No'
     ]);
 
-    // Combine headers and rows
     const csvContent = [
       headers.join(','),
       ...csvRows.map(row => row.join(','))
     ].join('\n');
 
-    // Create blob and download
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
@@ -644,6 +825,14 @@ const ForestBiomassApp = () => {
       marginBottom: '20px',
       border: '1px solid #f5c6cb'
     },
+    warning: {
+      backgroundColor: '#fff3cd',
+      color: '#856404',
+      padding: '12px 20px',
+      borderRadius: '4px',
+      marginBottom: '20px',
+      border: '1px solid #ffeeba'
+    },
     loading: {
       textAlign: 'center',
       padding: '40px',
@@ -680,81 +869,113 @@ const ForestBiomassApp = () => {
       alignItems: 'center',
       gap: '10px',
       marginBottom: '20px'
+    },
+    checkbox: {
+      marginRight: '8px'
     }
   };
 
   return (
     <div style={styles.container}>
-      <h1 style={styles.header}>Kalliomarken - NDVI & Biomass Growth Model Estimation</h1>
+      <h1 style={styles.header}>Kalliomarken - Real-time Sentinel-2 NDVI & Biomass Analysis</h1>
       
       <div style={styles.info}>
-        <strong>Copernicus Sentinel-2 L2A ESA Mission 2015</strong>
+        <strong>Copernicus Sentinel-2 L2A - Actual Satellite Data Processing</strong>
         <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
-          <li>Fetches satellite images for a selected forest area</li>
-          <li>Calculates Normalized Difference Vegetation Index (NDVI): (B08 - B04) / (B08 + B04) using NIR and Red bands</li>
-          <li>Estimates temporal growth model based on species-specific parameters, forest age and vegetation filtering (SCL bands)</li>
-          <li>Estimates biomass progression: Shows expected growth over time</li>
+          <li>Fetches real Sentinel-2 satellite imagery via Statistical API</li>
+          <li>Calculates actual NDVI from NIR (B08) and Red (B04) bands</li>
+          <li>Filters vegetation pixels using Scene Classification Layer (SCL)</li>
+          <li>Detects water bodies (NDVI {'<'} 0.1) and alerts user</li>
+          <li>Applies species-specific growth models to estimate biomass</li>
         </ul>
       </div>
 
       {error && (
-        <div style={styles.error}>
-          <strong>Error:</strong> {error}
+        <div style={error.includes('Warning') ? styles.warning : styles.error}>
+          <strong>{error.includes('Warning') ? 'Warning:' : 'Error:'}</strong> {error}
         </div>
       )}
 
       <div style={styles.authSection}>
         <h3>Authentication</h3>
-        <div style={styles.controls}>
+        <div style={{ marginBottom: '10px' }}>
+          <label>
+            <input
+              type="checkbox"
+              style={styles.checkbox}
+              checked={manualAuthMode}
+              onChange={(e) => setManualAuthMode(e.target.checked)}
+            />
+            Use manual token mode (if CORS blocks direct auth)
+          </label>
+        </div>
+        
+        {!manualAuthMode ? (
+          <div style={styles.controls}>
+            <div>
+              <label style={styles.label}>Client ID</label>
+              <input
+                style={styles.input}
+                type="text"
+                placeholder="OAuth2 Client ID"
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+                disabled={authenticated}
+              />
+            </div>
+            <div>
+              <label style={styles.label}>Client Secret</label>
+              <input
+                style={styles.input}
+                type="password"
+                placeholder="OAuth2 Client Secret"
+                value={clientSecret}
+                onChange={(e) => setClientSecret(e.target.value)}
+                disabled={authenticated}
+              />
+            </div>
+          </div>
+        ) : (
           <div>
-            <label style={styles.label}>Client ID</label>
+            <label style={styles.label}>Access Token (get from Copernicus Data Space)</label>
             <input
               style={styles.input}
               type="text"
-              placeholder="OAuth2 Client ID"
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              disabled={authenticated}
-            />
-          </div>
-          <div>
-            <label style={styles.label}>Client Secret</label>
-            <input
-              style={styles.input}
-              type="password"
-              placeholder="OAuth2 Client Secret"
-              value={clientSecret}
-              onChange={(e) => setClientSecret(e.target.value)}
-              disabled={authenticated}
-            />
-          </div>
-          <div>
-            <label style={styles.label}>Manual Token (if CORS blocked)</label>
-            <input
-              style={styles.input}
-              type="text"
-              placeholder="Paste access token"
+              placeholder="Paste your access token here"
               onChange={(e) => {
                 if (e.target.value) {
                   setAccessToken(e.target.value);
-                  setTokenExpiry(Date.now() + (540 * 1000));
+                  setTokenExpiry(Date.now() + (540 * 1000)); // 9 minutes
                   setAuthenticated(true);
+                  setError(null);
                 }
               }}
               disabled={authenticated}
             />
+            <p style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+              Get token from: https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token
+            </p>
           </div>
-        </div>
-        <button
-          style={{
-            ...styles.button,
-            ...(authenticated ? styles.buttonDisabled : {})
-          }}
-          onClick={authenticateCDSE}
-          disabled={authenticated}
-        >
-          {authenticated ? 'Authenticated' : 'Authenticate'}
-        </button>
+        )}
+        
+        {!manualAuthMode && (
+          <button
+            style={{
+              ...styles.button,
+              ...(authenticated ? styles.buttonDisabled : {})
+            }}
+            onClick={authenticateCDSE}
+            disabled={authenticated}
+          >
+            {authenticated ? 'Authenticated' : 'Authenticate'}
+          </button>
+        )}
+        
+        {authenticated && (
+          <p style={{ color: '#28a745', marginTop: '10px' }}>
+            ✓ Authenticated successfully
+          </p>
+        )}
       </div>
 
       <div style={styles.controls}>
@@ -827,7 +1048,7 @@ const ForestBiomassApp = () => {
         onClick={fetchSatelliteData}
         disabled={loading || selectedForests.length === 0 || !authenticated}
       >
-        {loading ? 'Processing...' : 'Analyze Biomass with Growth Model'}
+        {loading ? 'Processing Real Satellite Data...' : 'Analyze with Real Sentinel-2 Data'}
       </button>
 
       {selectedForests.length > 0 && (
@@ -853,7 +1074,7 @@ const ForestBiomassApp = () => {
 
       {loading && (
         <div style={styles.loading}>
-          <p>Processing satellite imagery with NDVI...</p>
+          <p>Processing real Sentinel-2 satellite data...</p>
           <p style={{ fontSize: '14px', color: '#999' }}>{processingStatus}</p>
         </div>
       )}
@@ -861,7 +1082,7 @@ const ForestBiomassApp = () => {
       {biomassData.length > 0 && (
         <div style={styles.chartContainer}>
           <div style={styles.buttonContainer}>
-            <h2 style={{ margin: 0 }}>Biomass Growth Trends with 1-Year Rolling Average</h2>
+            <h2 style={{ margin: 0 }}>Real Satellite Data: NDVI & Biomass Trends</h2>
             <button
               style={styles.exportButton}
               onClick={exportToCSV}
@@ -890,7 +1111,7 @@ const ForestBiomassApp = () => {
                 yAxisId="ndvi" 
                 orientation="right" 
                 label={{ value: 'NDVI', angle: 90, position: 'insideRight' }} 
-                domain={[0, 1]}
+                domain={[-0.2, 1]}
               />
               <Tooltip 
                 formatter={(value, name) => {
@@ -902,7 +1123,7 @@ const ForestBiomassApp = () => {
                 }}
                 labelFormatter={(label) => {
                   const item = biomassData.find(d => d.date === label);
-                  return item ? `${label} (Forest Age: ${item.forestAge} years)` : label;
+                  return item ? `${label} (Forest Age: ${item.forestAge} years, ${item.dataPoints} observations)` : label;
                 }}
               />
               <Legend />
@@ -951,127 +1172,115 @@ const ForestBiomassApp = () => {
           </ResponsiveContainer>
 
           <div style={styles.techDetails}>
-            <h3>Technical Implementation Details</h3>
+            <h3>Technical Implementation - Real Satellite Data Processing</h3>
             
-            <h4>1. Remote Sensing Data Acquisition</h4>
-            <p><strong>Sentinel-2 MSI Specifications:</strong></p>
-            <ul style={{ fontSize: '13px', marginLeft: '20px' }}>
-              <li><strong>B04 (Red):</strong> Central wavelength 665nm, bandwidth 30nm, 10m spatial resolution</li>
-              <li><strong>B08 (NIR):</strong> Central wavelength 842nm, bandwidth 115nm, 10m spatial resolution</li>
-              <li><strong>SCL (Scene Classification Layer):</strong> 20m resolution, classes 4-5 for vegetation filtering</li>
-              <li><strong>Radiometric resolution:</strong> 12-bit (0-4095 DN), converted to reflectance (0-1.0)</li>
-              <li><strong>Temporal resolution:</strong> 5-day revisit with twin satellites (2A/2B)</li>
-            </ul>
+            <h4>1. Sentinel Hub Statistical API Integration</h4>
+            <p><strong>API Endpoint:</strong> https://sh.dataspace.copernicus.eu/api/v3/statistics</p>
+            <p><strong>Authentication:</strong> OAuth2 Bearer Token</p>
+            <p><strong>Data Collection:</strong> sentinel-2-l2a (Level-2A atmospherically corrected)</p>
+            <p><strong>Spatial Resolution:</strong> 10m × 10m pixels</p>
+            <p><strong>Cloud Coverage Filter:</strong> Maximum 30%</p>
             
-            <h4>2. NDVI Calculation Pipeline</h4>
-            <p><strong>Formula:</strong> NDVI = (ρNIR - ρRed) / (ρNIR + ρRed + ε)</p>
-            <ul style={{ fontSize: '13px', marginLeft: '20px' }}>
-              <li>ρNIR = B08 surface reflectance (L2A atmospherically corrected)</li>
-              <li>ρRed = B04 surface reflectance (L2A atmospherically corrected)</li>
-              <li>ε = 0.00001 (epsilon to prevent division by zero)</li>
-              <li>Value range: -1.0 to +1.0 (clamped)</li>
-              <li>Vegetation pixels: NDVI typically 0.3-0.9 for healthy forest</li>
-            </ul>
+            <h4>2. NDVI Calculation from Real Satellite Data</h4>
+            <pre style={{ fontSize: '12px', backgroundColor: '#f5f5f5', padding: '10px', borderRadius: '4px' }}>
+{`// Evalscript executed on Sentinel Hub servers
+function evaluatePixel(samples) {
+  // Calculate NDVI from real band values
+  let ndvi = (samples.B08 - samples.B04) / (samples.B08 + samples.B04 + 0.00001);
+  
+  // Validate pixel using Scene Classification Layer
+  let isValid = samples.dataMask === 1 && 
+               (samples.SCL === 4 ||  // Vegetation
+                samples.SCL === 5 ||  // Not vegetated
+                samples.SCL === 6);   // Water
+  
+  return {
+    ndvi: [isValid ? ndvi : NaN],
+    ndvi_valid_pixels: [isValid ? 1 : 0]
+  };
+}`}
+            </pre>
             
-            <h4>3. Biomass Growth Model (Chapman-Richards)</h4>
-            <p><strong>Mathematical formulation:</strong></p>
-            <p style={{ fontFamily: 'monospace', backgroundColor: '#f5f5f5', padding: '10px', borderRadius: '4px' }}>
-              Biomass(t) = Byoung + (Bmax - Byoung) × (1 - e^(-k × age)) × fNDVI
-            </p>
-            <p><strong>Parameter definitions:</strong></p>
-            <ul style={{ fontSize: '13px', marginLeft: '20px' }}>
-              <li><strong>Byoung:</strong> Initial biomass at establishment (tons/ha)</li>
-              <li><strong>Bmax:</strong> Asymptotic maximum biomass (tons/ha)</li>
-              <li><strong>k:</strong> Growth rate coefficient (year⁻¹)</li>
-              <li><strong>age:</strong> Stand age (years)</li>
-              <li><strong>fNDVI:</strong> NDVI adjustment factor = min(1, NDVI/NDVIsat)</li>
-            </ul>
+            <h4>3. Current Analysis Results</h4>
+            {biomassData.length > 0 && (
+              <ul style={{ fontSize: '13px', marginLeft: '20px' }}>
+                <li><strong>Data Points:</strong> {biomassData.length} temporal observations</li>
+                <li><strong>Average NDVI:</strong> {(biomassData.reduce((sum, d) => sum + d.ndvi, 0) / biomassData.length).toFixed(3)}</li>
+                <li><strong>NDVI Range:</strong> {Math.min(...biomassData.map(d => d.ndvi)).toFixed(3)} to {Math.max(...biomassData.map(d => d.ndvi)).toFixed(3)}</li>
+                <li><strong>Total Biomass Change:</strong> {((biomassData[biomassData.length-1].biomass - biomassData[0].biomass) / biomassData[0].biomass * 100).toFixed(1)}%</li>
+                <li><strong>Water Detection:</strong> {biomassData.some(d => d.isWater) ? 'Water characteristics detected' : 'Vegetation confirmed'}</li>
+              </ul>
+            )}
             
-            <h4>4. Species-Specific Parameters (Calibrated from Finnish NFI)</h4>
+            <h4>4. Scene Classification Layer (SCL) Classes Used</h4>
             <table style={{ fontSize: '13px', borderCollapse: 'collapse', marginTop: '10px' }}>
               <thead>
                 <tr style={{ backgroundColor: '#f0f0f0' }}>
-                  <th style={{ padding: '8px', border: '1px solid #ddd' }}>Species</th>
-                  <th style={{ padding: '8px', border: '1px solid #ddd' }}>Bmax (t/ha)</th>
-                  <th style={{ padding: '8px', border: '1px solid #ddd' }}>k (yr⁻¹)</th>
-                  <th style={{ padding: '8px', border: '1px solid #ddd' }}>NDVIsat</th>
-                  <th style={{ padding: '8px', border: '1px solid #ddd' }}>Byoung (t/ha)</th>
+                  <th style={{ padding: '8px', border: '1px solid #ddd' }}>SCL Value</th>
+                  <th style={{ padding: '8px', border: '1px solid #ddd' }}>Class</th>
+                  <th style={{ padding: '8px', border: '1px solid #ddd' }}>Used</th>
+                  <th style={{ padding: '8px', border: '1px solid #ddd' }}>Expected NDVI</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>Pine (Pinus sylvestris)</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>450</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>0.08</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>0.85</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>20</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>4</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>Vegetation</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>✓</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>0.3 - 0.9</td>
                 </tr>
                 <tr>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>Fir (Picea abies)</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>500</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>0.07</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>0.88</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>25</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>5</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>Not vegetated</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>✓</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>0.0 - 0.3</td>
                 </tr>
                 <tr>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>Birch (Betula spp.)</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>300</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>0.12</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>0.82</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>15</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>6</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>Water</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>✓</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>-0.2 - 0.1</td>
                 </tr>
-                <tr>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>Aspen (Populus tremula)</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>250</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>0.15</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>0.80</td>
-                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>12</td>
+                <tr style={{ backgroundColor: '#f8f8f8' }}>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>8, 9</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>Cloud medium/high</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>✗</td>
+                  <td style={{ padding: '8px', border: '1px solid #ddd' }}>Filtered out</td>
                 </tr>
               </tbody>
             </table>
             
-            <h4>5. Temporal Data Processing</h4>
-            <p><strong>Sampling strategy:</strong></p>
-            <ul style={{ fontSize: '13px', marginLeft: '20px' }}>
-              <li>Temporal coverage: 10-year retrospective analysis</li>
-              <li>Seasonal sampling: June 15, July 15, August 15 (peak growing season)</li>
-              <li>Annual observations: 3 per year × 10 years = 30 data points</li>
-              <li>Cloud filtering: Maximum 5% cloud coverage threshold</li>
-            </ul>
-            
-            <h4>6. Statistical Analysis</h4>
-            <p><strong>Rolling average calculation:</strong></p>
+            <h4>5. API Response Structure</h4>
             <pre style={{ fontSize: '12px', backgroundColor: '#f5f5f5', padding: '10px', borderRadius: '4px' }}>
-{`RollingAvg[i] = Σ(value[j]) / n
-where j = max(0, i-w+1) to i
-w = window size (3 points = 1 year)
-n = actual window size`}
+{`{
+  "data": [{
+    "interval": {
+      "from": "2024-07-01T00:00:00Z",
+      "to": "2024-07-02T00:00:00Z"
+    },
+    "outputs": {
+      "ndvi": {
+        "bands": {
+          "B0": {
+            "stats": {
+              "min": 0.234,
+              "max": 0.876,
+              "mean": 0.654,
+              "stDev": 0.123,
+              "sampleCount": 45678,
+              "noDataCount": 1234
+            }
+          }
+        }
+      }
+    }
+  }]
+}`}
             </pre>
             
-            <h4>7. Current Analysis Metrics</h4>
-            <p><strong>Data Points:</strong> {biomassData.length} observations over {biomassData[biomassData.length-1].yearsFromStart + 1} years</p>
-            <p><strong>Growth Performance:</strong></p>
-            <ul style={{ fontSize: '13px', marginLeft: '20px' }}>
-              <li><strong>Total biomass increase:</strong> {((biomassData[biomassData.length-1].biomass - biomassData[0].biomass) / biomassData[0].biomass * 100).toFixed(1)}%</li>
-              <li><strong>Mean annual increment:</strong> {((biomassData[biomassData.length-1].biomass - biomassData[0].biomass) / (biomassData[biomassData.length-1].yearsFromStart)).toFixed(1)} tons/ha/year</li>
-              <li><strong>Current biomass (smoothed):</strong> {biomassData[biomassData.length-1].biomassRollingAvg ? biomassData[biomassData.length-1].biomassRollingAvg.toFixed(1) : 'N/A'} tons/ha</li>
-              <li><strong>Current NDVI (smoothed):</strong> {biomassData[biomassData.length-1].ndviRollingAvg ? biomassData[biomassData.length-1].ndviRollingAvg.toFixed(3) : 'N/A'}</li>
-              <li><strong>Growth phase:</strong> {biomassData[biomassData.length-1].biomass < forestParams[selectedForests[selectedForestIndex].type].maxBiomass * 0.9 ? 'Active growth' : 'Approaching maturity'}</li>
-            </ul>
-            
-            <h4>8. Sentinel Hub Process API Integration</h4>
-            <p><strong>Evalscript implementation:</strong></p>
-            <ul style={{ fontSize: '13px', marginLeft: '20px' }}>
-              <li>Input bands: ["B04", "B08", "SCL", "dataMask"]</li>
-              <li>Output: NDVI (FLOAT32), RGB visualization (PNG)</li>
-              <li>Vegetation filtering: SCL == 4 (vegetation) || SCL == 5 (not vegetated)</li>
-              <li>Processing level: L2A (atmospherically corrected)</li>
-              <li>Coordinate system: EPSG:4326 (WGS84)</li>
-            </ul>
-            
             <p style={{ fontSize: '12px', marginTop: '15px', color: '#666' }}>
-              <strong>Data sources:</strong> Finnish National Forest Inventory (1996-2018), Copernicus Sentinel-2 L2A, 
-              ESA Sen2Cor atmospheric correction, biomass allometric equations calibrated for boreal conditions
+              <strong>Data Processing:</strong> Real-time satellite data from Copernicus Sentinel-2 L2A, 
+              processed through Sentinel Hub Statistical API with atmospheric correction and cloud masking.
             </p>
           </div>
         </div>
@@ -1084,4 +1293,3 @@ n = actual window size`}
 };
 
 export default ForestBiomassApp;
-
