@@ -1073,14 +1073,15 @@ n = actual window size`}
               <strong>Data sources:</strong> Finnish National Forest Inventory (1996-2018), Copernicus Sentinel-2 L2A, 
               ESA Sen2Cor atmospheric correction, biomass allometric equations calibrated for boreal conditions
             </p>
-            <p style={{ fontSize: '12px', marginTop: '15px', color: '#666' }}>
-              <strong>Author:</strong> @robertkottelin at X
-            </p>
           </div>
         </div>
       )}
+      <p style={{ fontSize: '12px', marginTop: '15px', color: '#666' }}>
+          <strong>Author:</strong> @robertkottelin at X
+      </p>
     </div>
   );
 };
 
 export default ForestBiomassApp;
+
