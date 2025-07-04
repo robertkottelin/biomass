@@ -1,6 +1,6 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "Biomass Sat-An",
+  "name": "Forest Biomass Sentinel-2 Satellite Analyzer",
   "icons": [
     {
       "src": "favicon.ico",
