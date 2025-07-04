@@ -132,28 +132,30 @@ const ForestBiomassApp = () => {
   const [tokenExpiry, setTokenExpiry] = useState(null);
   const [manualAuthMode, setManualAuthMode] = useState(false);
   const mapRef = useRef();
+  const [showInstructions, setShowInstructions] = useState(true);
+
 
   // Forest parameters with growth curves based on scientific literature
   const forestParams = {
-    pine: { 
+    pine: {
       maxBiomass: 450,      // Maximum biomass (tons/ha) at maturity
       growthRate: 0.08,     // Growth rate parameter
       ndviSaturation: 0.85, // NDVI saturation level for mature forest
       youngBiomass: 20      // Initial biomass for young forest
     },
-    fir: { 
+    fir: {
       maxBiomass: 500,
       growthRate: 0.07,
       ndviSaturation: 0.88,
       youngBiomass: 25
     },
-    birch: { 
+    birch: {
       maxBiomass: 300,
       growthRate: 0.12,
       ndviSaturation: 0.82,
       youngBiomass: 15
     },
-    aspen: { 
+    aspen: {
       maxBiomass: 250,
       growthRate: 0.15,
       ndviSaturation: 0.80,
@@ -196,7 +198,7 @@ const ForestBiomassApp = () => {
       tokenData.append('grant_type', 'client_credentials');
 
       console.log('Authenticating with Copernicus Data Space...');
-      
+
       // Copernicus Data Space authentication endpoint
       const tokenResponse = await fetch('https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token', {
         method: 'POST',
@@ -207,10 +209,10 @@ const ForestBiomassApp = () => {
       });
 
       const responseText = await tokenResponse.text();
-      
+
       if (!tokenResponse.ok) {
         console.error('Authentication failed:', tokenResponse.status, responseText);
-        
+
         // Parse error details if available
         try {
           const errorData = JSON.parse(responseText);
@@ -220,26 +222,26 @@ const ForestBiomassApp = () => {
         } catch (e) {
           // If not JSON, use raw response
         }
-        
+
         throw new Error(`Authentication failed: ${tokenResponse.status} - ${responseText}`);
       }
 
       const tokenResult = JSON.parse(responseText);
-      
+
       if (!tokenResult.access_token) {
         throw new Error('No access token received');
       }
-      
+
       console.log('Authentication successful');
       console.log('Token type:', tokenResult.token_type);
       console.log('Token expires in:', tokenResult.expires_in, 'seconds');
       console.log('Token first 20 chars:', tokenResult.access_token.substring(0, 20) + '...');
-      
+
       setAccessToken(tokenResult.access_token);
       setTokenExpiry(Date.now() + ((tokenResult.expires_in - 60) * 1000));
       setAuthenticated(true);
       setProcessingStatus('');
-      
+
       return true;
     } catch (err) {
       console.error('Authentication error:', err);
@@ -313,7 +315,7 @@ function evaluatePixel(sample) {
       });
 
       console.log('Process API Response Status:', response.status);
-      
+
       if (response.ok) {
         setProcessingStatus('');
         setError(null);
@@ -340,24 +342,24 @@ function evaluatePixel(sample) {
 
   const estimateBiomass = (ndvi, forestType, yearsFromStart, currentForestAge) => {
     const params = forestParams[forestType];
-    
+
     // For water bodies (negative NDVI), return 0 biomass
     if (ndvi < 0) {
       return 0;
     }
-    
+
     // Logistic growth model for forest biomass accumulation
     const currentAge = currentForestAge + yearsFromStart;
     const growthFactor = 1 - Math.exp(-params.growthRate * currentAge);
-    
+
     // NDVI-based adjustment factor (accounts for vegetation health/density)
     const ndviNormalized = Math.max(0, ndvi) / params.ndviSaturation;
     const ndviFactor = Math.min(1, ndviNormalized);
-    
+
     // Calculate biomass combining growth model and NDVI
-    const biomass = params.youngBiomass + 
-                   (params.maxBiomass - params.youngBiomass) * growthFactor * ndviFactor;
-    
+    const biomass = params.youngBiomass +
+      (params.maxBiomass - params.youngBiomass) * growthFactor * ndviFactor;
+
     return Math.max(0, biomass);
   };
 
@@ -366,10 +368,10 @@ function evaluatePixel(sample) {
     return data.map((item, index) => {
       const startIndex = Math.max(0, index - windowSize + 1);
       const windowData = data.slice(startIndex, index + 1);
-      
+
       const sum = windowData.reduce((acc, d) => acc + d[key], 0);
       const average = sum / windowData.length;
-      
+
       return {
         ...item,
         [`${key}RollingAvg`]: average
@@ -380,30 +382,30 @@ function evaluatePixel(sample) {
   // Simplified TIFF parser for FLOAT32 single-band data
   const parseTIFF = (arrayBuffer) => {
     const dataView = new DataView(arrayBuffer);
-    
+
     // Read TIFF header
     const byteOrder = dataView.getUint16(0);
     const littleEndian = byteOrder === 0x4949; // 'II' = little endian, 'MM' = big endian
-    
+
     // Verify magic number (42)
     const magicNumber = dataView.getUint16(2, littleEndian);
     if (magicNumber !== 42) {
       throw new Error(`Invalid TIFF magic number: ${magicNumber}`);
     }
-    
+
     // Get IFD offset
     const ifdOffset = dataView.getUint32(4, littleEndian);
-    
+
     // Read IFD
     const tagCount = dataView.getUint16(ifdOffset, littleEndian);
-    
+
     let imageWidth = 0;
     let imageHeight = 0;
     let stripOffsets = null;
     let stripByteCounts = null;
     let bitsPerSample = 32;
     let sampleFormat = 3; // IEEE floating point
-    
+
     // Parse IFD entries (12 bytes each)
     for (let i = 0; i < tagCount; i++) {
       const entryOffset = ifdOffset + 2 + (i * 12);
@@ -411,7 +413,7 @@ function evaluatePixel(sample) {
       const type = dataView.getUint16(entryOffset + 2, littleEndian);
       const count = dataView.getUint32(entryOffset + 4, littleEndian);
       const valueOffset = entryOffset + 8;
-      
+
       switch (tag) {
         case 256: // ImageWidth
           imageWidth = type === 3 ? dataView.getUint16(valueOffset, littleEndian) : dataView.getUint32(valueOffset, littleEndian);
@@ -451,13 +453,13 @@ function evaluatePixel(sample) {
           break;
       }
     }
-    
+
     console.log(`TIFF metadata: ${imageWidth}x${imageHeight}, ${bitsPerSample} bits, format=${sampleFormat}, endian=${littleEndian ? 'little' : 'big'}`);
-    
+
     // Read pixel data
     const pixelCount = imageWidth * imageHeight;
     const pixels = new Float32Array(pixelCount);
-    
+
     if (Array.isArray(stripOffsets)) {
       // Multiple strips
       let pixelIndex = 0;
@@ -465,7 +467,7 @@ function evaluatePixel(sample) {
         const stripOffset = stripOffsets[i];
         const stripSize = stripByteCounts[i];
         const floatsInStrip = stripSize / 4;
-        
+
         for (let j = 0; j < floatsInStrip && pixelIndex < pixelCount; j++) {
           pixels[pixelIndex++] = dataView.getFloat32(stripOffset + j * 4, littleEndian);
         }
@@ -476,7 +478,7 @@ function evaluatePixel(sample) {
         pixels[i] = dataView.getFloat32(stripOffsets + i * 4, littleEndian);
       }
     }
-    
+
     return {
       width: imageWidth,
       height: imageHeight,
@@ -488,19 +490,19 @@ function evaluatePixel(sample) {
   const fetchNDVIData = async (polygon, dateFrom, dateTo) => {
     // CRITICAL FIX: Ensure correct coordinate order [lng, lat] for WGS84
     const coords = polygon.coords.map(coord => [coord[1], coord[0]]); // Convert from [lat,lng] to [lng,lat]
-    
+
     // Create properly closed GeoJSON polygon
     const geoJsonCoords = [...coords];
-    if (geoJsonCoords[0][0] !== geoJsonCoords[geoJsonCoords.length - 1][0] || 
-        geoJsonCoords[0][1] !== geoJsonCoords[geoJsonCoords.length - 1][1]) {
+    if (geoJsonCoords[0][0] !== geoJsonCoords[geoJsonCoords.length - 1][0] ||
+      geoJsonCoords[0][1] !== geoJsonCoords[geoJsonCoords.length - 1][1]) {
       geoJsonCoords.push(geoJsonCoords[0]); // Close the polygon
     }
-    
+
     const geoJson = {
       type: "Polygon",
       coordinates: [geoJsonCoords]
     };
-    
+
     // Calculate bounding box [west, south, east, north]
     const lons = coords.map(c => c[0]);
     const lats = coords.map(c => c[1]);
@@ -510,19 +512,19 @@ function evaluatePixel(sample) {
       Math.max(...lons), // east (max longitude)
       Math.max(...lats)  // north (max latitude)
     ];
-    
+
     // Log coordinate verification
     console.log('=== COORDINATE VERIFICATION ===');
     console.log('Original polygon (lat,lng):', polygon.coords.slice(0, 3).map(c => `[${c[0].toFixed(6)}, ${c[1].toFixed(6)}]`).join(', '));
     console.log('Transformed (lng,lat):', coords.slice(0, 3).map(c => `[${c[0].toFixed(6)}, ${c[1].toFixed(6)}]`).join(', '));
     console.log('Bounding box [W,S,E,N]:', bbox.map(v => v.toFixed(6)).join(', '));
     console.log('GeoJSON polygon vertices:', geoJsonCoords.length);
-    
+
     // Calculate resolution based on polygon size
     const latDistance = Math.abs(bbox[3] - bbox[1]) * 111000; // meters
     const lonDistance = Math.abs(bbox[2] - bbox[0]) * 111000 * Math.cos(((bbox[1] + bbox[3]) / 2) * Math.PI / 180);
     const maxDimension = Math.max(latDistance, lonDistance);
-    
+
     // Adaptive resolution: higher resolution for smaller areas
     let pixelWidth, pixelHeight;
     if (maxDimension < 1000) {
@@ -534,10 +536,10 @@ function evaluatePixel(sample) {
     } else {
       pixelWidth = pixelHeight = 300; // 300x300 pixels for large areas
     }
-    
-    console.log(`Polygon dimensions: ${(latDistance/1000).toFixed(1)}km x ${(lonDistance/1000).toFixed(1)}km`);
+
+    console.log(`Polygon dimensions: ${(latDistance / 1000).toFixed(1)}km x ${(lonDistance / 1000).toFixed(1)}km`);
     console.log(`Using resolution: ${pixelWidth}x${pixelHeight} pixels`);
-    
+
     // FIXED evalscript - removed units specification to get reflectance by default
     const evalscript = `
       //VERSION=3
@@ -583,7 +585,7 @@ function evaluatePixel(sample) {
         return [ndvi];
       }
     `;
-    
+
     // Process API request with geometry clipping
     const processRequest = {
       input: {
@@ -618,14 +620,14 @@ function evaluatePixel(sample) {
       },
       evalscript: evalscript
     };
-    
+
     console.log('=== PROCESS API REQUEST ===');
     console.log('Date range:', dateFrom, 'to', dateTo);
     console.log('Bbox [W,S,E,N]:', bbox);
     console.log('Output size:', pixelWidth, 'x', pixelHeight);
     console.log('Geometry type:', processRequest.input.bounds.geometry.type);
     console.log('CRS:', processRequest.input.bounds.properties.crs);
-    
+
     try {
       const response = await fetch('https://sh.dataspace.copernicus.eu/api/v1/process', {
         method: 'POST',
@@ -636,42 +638,42 @@ function evaluatePixel(sample) {
         },
         body: JSON.stringify(processRequest)
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Process API error:', response.status, errorText);
         throw new Error(`Process API error: ${response.status} - ${errorText}`);
       }
-      
+
       // Parse TIFF response using GeoTIFF.js
       const arrayBuffer = await response.arrayBuffer();
       console.log('Received TIFF data:', arrayBuffer.byteLength, 'bytes');
-      
+
       // Use GeoTIFF.js for proper compressed TIFF parsing
       let ndviValues = [];
-      
+
       if (window.GeoTIFF) {
         try {
           const tiff = await window.GeoTIFF.fromArrayBuffer(arrayBuffer);
           const image = await tiff.getImage();
-          
+
           // Get image metadata
           const width = image.getWidth();
           const height = image.getHeight();
           const samplesPerPixel = image.getSamplesPerPixel();
-          
+
           console.log(`TIFF metadata: ${width}x${height}, ${samplesPerPixel} bands`);
-          
+
           // Read raster data
           const rasters = await image.readRasters();
           const data = rasters[0]; // First band contains NDVI values
-          
+
           // Extract valid NDVI values
           let nanCount = 0;
-          
+
           for (let i = 0; i < data.length; i++) {
             const value = data[i];
-            
+
             if (isNaN(value)) {
               nanCount++;
             } else if (value >= -1.0 && value <= 1.0) {
@@ -680,10 +682,10 @@ function evaluatePixel(sample) {
               console.warn(`Unexpected NDVI value at pixel ${i}: ${value}`);
             }
           }
-          
+
           console.log(`Parsed ${ndviValues.length} valid NDVI values from ${data.length} total pixels using GeoTIFF.js`);
           console.log(`NaN values (masked/cloudy): ${nanCount}`);
-          
+
         } catch (geoTiffError) {
           console.error('GeoTIFF.js parsing error:', geoTiffError);
           throw new Error('Failed to parse TIFF with GeoTIFF.js: ' + geoTiffError.message);
@@ -691,38 +693,38 @@ function evaluatePixel(sample) {
       } else {
         throw new Error('GeoTIFF.js library not loaded');
       }
-      
+
       if (ndviValues.length === 0) {
         console.error('No valid NDVI values extracted from TIFF');
         return null;
       }
-      
+
       // Calculate statistics
       const mean = ndviValues.reduce((a, b) => a + b, 0) / ndviValues.length;
       const min = Math.min(...ndviValues);
       const max = Math.max(...ndviValues);
-      
+
       // Land cover analysis
       const vegetationPixels = ndviValues.filter(v => v > 0.3).length;
       const moderateVegPixels = ndviValues.filter(v => v > 0.2 && v <= 0.3).length;
       const barePixels = ndviValues.filter(v => v >= 0 && v <= 0.2).length;
       const waterPixels = ndviValues.filter(v => v < 0).length;
-      
+
       console.log(`=== NDVI DATA VERIFICATION ===`);
-      console.log(`Total valid pixels: ${ndviValues.length}/${pixelWidth * pixelHeight} (${(ndviValues.length/(pixelWidth * pixelHeight)*100).toFixed(1)}%)`);
+      console.log(`Total valid pixels: ${ndviValues.length}/${pixelWidth * pixelHeight} (${(ndviValues.length / (pixelWidth * pixelHeight) * 100).toFixed(1)}%)`);
       console.log(`NDVI Statistics: mean=${mean.toFixed(3)}, min=${min.toFixed(3)}, max=${max.toFixed(3)}`);
       console.log(`Land Cover Classification:`);
-      console.log(`- Dense Vegetation (>0.3): ${vegetationPixels} pixels (${(vegetationPixels/ndviValues.length*100).toFixed(1)}%)`);
-      console.log(`- Sparse Vegetation (0.2-0.3): ${moderateVegPixels} pixels (${(moderateVegPixels/ndviValues.length*100).toFixed(1)}%)`);
-      console.log(`- Bare/Urban (0-0.2): ${barePixels} pixels (${(barePixels/ndviValues.length*100).toFixed(1)}%)`);
-      console.log(`- Water (<0): ${waterPixels} pixels (${(waterPixels/ndviValues.length*100).toFixed(1)}%)`);
-      
+      console.log(`- Dense Vegetation (>0.3): ${vegetationPixels} pixels (${(vegetationPixels / ndviValues.length * 100).toFixed(1)}%)`);
+      console.log(`- Sparse Vegetation (0.2-0.3): ${moderateVegPixels} pixels (${(moderateVegPixels / ndviValues.length * 100).toFixed(1)}%)`);
+      console.log(`- Bare/Urban (0-0.2): ${barePixels} pixels (${(barePixels / ndviValues.length * 100).toFixed(1)}%)`);
+      console.log(`- Water (<0): ${waterPixels} pixels (${(waterPixels / ndviValues.length * 100).toFixed(1)}%)`);
+
       // Area suitability check
       if (mean < 0.2 && vegetationPixels < ndviValues.length * 0.1) {
         console.warn('⚠️ AREA NOT SUITABLE FOR FOREST ANALYSIS - NDVI too low');
         console.warn('→ Please select a polygon over forested area (expected NDVI > 0.3 for majority of pixels)');
       }
-      
+
       return {
         mean: mean,
         min: min,
@@ -732,7 +734,7 @@ function evaluatePixel(sample) {
         vegetationPixels: vegetationPixels,
         vegetationPercent: (vegetationPixels / ndviValues.length * 100)
       };
-      
+
     } catch (error) {
       console.error('Error fetching NDVI data:', error);
       throw error;
@@ -748,7 +750,7 @@ function evaluatePixel(sample) {
       limit: 100,
       filter: "eo:cloud_cover < 30"
     };
-    
+
     try {
       const response = await fetch('https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/search', {
         method: 'POST',
@@ -758,13 +760,13 @@ function evaluatePixel(sample) {
         },
         body: JSON.stringify(catalogRequest)
       });
-      
+
       if (!response.ok) {
         throw new Error(`Catalog API error: ${response.status}`);
       }
-      
+
       const data = await response.json();
-      
+
       // Extract unique dates from features
       const dates = new Set();
       data.features.forEach(feature => {
@@ -773,7 +775,7 @@ function evaluatePixel(sample) {
           dates.add(date.toISOString().split('T')[0]);
         }
       });
-      
+
       return Array.from(dates).sort();
     } catch (error) {
       console.error('Error fetching catalog data:', error);
@@ -809,8 +811,8 @@ function evaluatePixel(sample) {
       const currentYear = currentDate.getFullYear();
       const currentMonth = currentDate.getMonth() + 1;
       const results = [];
-      const startYear = currentYear - 3; // Reduced to 3 years for daily data to manage volume
-      
+      const startYear = currentYear - 9;
+
       // Calculate bbox from polygon
       const coords = selectedForest.coords.map(coord => [coord[1], coord[0]]); // [lng, lat]
       const lons = coords.map(c => c[0]);
@@ -821,51 +823,51 @@ function evaluatePixel(sample) {
         Math.max(...lons),
         Math.max(...lats)
       ];
-      
+
       // Process last 3 years of summer data with individual acquisitions
       for (let year = startYear; year <= currentYear; year++) {
         const yearsFromStart = year - startYear;
-        
+
         // Skip future dates
         if (year === currentYear && currentMonth < 9) {
           console.log(`Skipping ${year} as summer season not complete yet`);
           continue;
         }
-        
+
         // Define date range for summer season
         const dateFrom = `${year}-06-01`;
         const dateTo = `${year}-08-31`;
-        
+
         setProcessingStatus(`Fetching available dates for ${year} summer...`);
-        
+
         // Get available acquisition dates from Catalog API
         const availableDates = await fetchAvailableDates(bbox, dateFrom, dateTo);
         console.log(`Found ${availableDates.length} acquisitions for ${year} summer`);
-        
+
         // Process each available date
         for (let i = 0; i < availableDates.length; i++) {
           const acquisitionDate = availableDates[i];
           setProcessingStatus(`Processing ${acquisitionDate} (${i + 1}/${availableDates.length} for ${year})...`);
-          
+
           try {
             // Fetch NDVI data for specific date with tight time window
             const dateTime = new Date(acquisitionDate);
             const nextDay = new Date(dateTime);
             nextDay.setDate(nextDay.getDate() + 1);
-            
+
             const ndviStats = await fetchNDVIData(
-              selectedForest, 
-              acquisitionDate, 
+              selectedForest,
+              acquisitionDate,
               nextDay.toISOString().split('T')[0]
             );
-            
+
             if (ndviStats && ndviStats.validPixels > 0) {
               const avgNDVI = ndviStats.mean;
               const dayOfYear = Math.floor((dateTime - new Date(year, 0, 0)) / 86400000);
               const fractionalYear = yearsFromStart + (dayOfYear / 365);
-              
+
               const biomass = estimateBiomass(avgNDVI, selectedForest.type, fractionalYear, forestAge);
-              
+
               results.push({
                 date: acquisitionDate,
                 year,
@@ -889,42 +891,42 @@ function evaluatePixel(sample) {
             console.error(`Error processing ${acquisitionDate}:`, dateError);
             // Continue with next date
           }
-          
+
           // Rate limiting - 500ms between requests
           await new Promise(resolve => setTimeout(resolve, 500));
         }
-        
+
         // Longer delay between years
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
-      
+
       if (results.length === 0) {
         setError('No valid satellite data found. Please try a different location or check your API access.');
         return;
       }
-      
+
       // Sort by date
       results.sort((a, b) => new Date(a.date) - new Date(b.date));
-      
+
       console.log(`Total acquisitions processed: ${results.length}`);
       console.log(`Date range: ${results[0].date} to ${results[results.length - 1].date}`);
-      
+
       // Calculate rolling averages with larger window for daily data
       const resultsWithRollingAvg = calculateRollingAverage(results, 'biomass', 7);
       const finalResults = calculateRollingAverage(resultsWithRollingAvg, 'ndvi', 7);
-      
+
       setBiomassData(finalResults);
       setProcessingStatus('');
-      
+
       // Vegetation coverage analysis
       const vegetatedCount = finalResults.filter(d => d.isForested).length;
       const vegPercent = (vegetatedCount / finalResults.length * 100).toFixed(1);
       console.log(`Vegetation coverage across time series: ${vegPercent}%`);
-      
+
       if (vegetatedCount < finalResults.length * 0.5) {
         setError(`Warning: Low vegetation detected in ${100 - vegPercent}% of observations. Please verify forest area selection.`);
       }
-      
+
     } catch (err) {
       setError(`Processing error: ${err.message}`);
     } finally {
@@ -970,7 +972,7 @@ function evaluatePixel(sample) {
 
   const handleForestTypeChange = (newType) => {
     setForestType(newType);
-    
+
     if (selectedForests.length > 0 && selectedForestIndex < selectedForests.length) {
       setSelectedForests(prevForests => {
         const updatedForests = [...prevForests];
@@ -980,7 +982,7 @@ function evaluatePixel(sample) {
         };
         return updatedForests;
       });
-      
+
       setBiomassData([]);
     }
   };
@@ -1044,9 +1046,9 @@ function evaluatePixel(sample) {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
-    
+
     const filename = `forest_biomass_daily_${selectedForests[selectedForestIndex].type}_${new Date().toISOString().slice(0, 10)}.csv`;
-    
+
     link.setAttribute('href', url);
     link.setAttribute('download', filename);
     link.style.visibility = 'hidden';
@@ -1212,21 +1214,130 @@ function evaluatePixel(sample) {
 
   return (
     <div style={styles.container}>
-      <h1 style={styles.header}>Sentinel-2 Daily Forest Monitoring - NDVI Time Series & Biomass Analysis</h1>
-      
-      <div style={styles.info}>
-        <strong>Daily Acquisition Mode - High-Resolution Time Series</strong>
-        <ul style={{ fontSize: '14px', margin: '10px 0', paddingLeft: '20px' }}>
-          <li>✅ Catalog API integration for acquisition discovery</li>
-          <li>✅ Individual date processing (typically every 3-5 days)</li>
-          <li>✅ 3-year analysis window with ~60-80 observations per summer</li>
-          <li>✅ 7-day rolling average for smoother trends</li>
-          <li>✅ Rate limiting: 500ms between requests</li>
-          <li>✅ Cloud coverage filter: &lt;30% per acquisition</li>
-        </ul>
-        <p style={{ fontSize: '13px', marginTop: '10px', fontStyle: 'italic' }}>
-          <strong>Note:</strong> Daily acquisition mode provides high temporal resolution for detailed forest dynamics analysis.
-        </p>
+      <h1 style={styles.header}>Sentinel-2 Forest Monitoring - NDVI Time Series & Biomass Analysis</h1>
+
+      {/* User Instructions Panel */}
+      <div style={{
+        ...styles.authSection,
+        marginBottom: '20px',
+        backgroundColor: '#f0f8ff'
+      }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: showInstructions ? '15px' : 0
+        }}>
+          <h3 style={{ margin: 0 }}>📋 User Instructions</h3>
+          <button
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '20px',
+              color: '#007bff'
+            }}
+            onClick={() => setShowInstructions(!showInstructions)}
+          >
+            {showInstructions ? '▼' : '▶'}
+          </button>
+        </div>
+        
+        {showInstructions && (
+          <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>1. Authentication Setup</h4>
+            <ul style={{ marginLeft: '20px' }}>
+              <li><strong>Option A - Direct OAuth2:</strong> Register at <a href="https://dataspace.copernicus.eu/" target="_blank">Copernicus Data Space</a> → Create OAuth2 client → Enter Client ID & Secret → Click "Authenticate"</li>
+              <li><strong>Option B - Manual Token:</strong> If CORS blocks direct auth, enable "Use manual token mode" → Get token via POST request to:
+                <code style={{ display: 'block', margin: '5px 0', padding: '5px', backgroundColor: '#f5f5f5', fontSize: '12px' }}>
+                  https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token
+                </code>
+                with body: <code>grant_type=client_credentials&client_id=YOUR_ID&client_secret=YOUR_SECRET</code>
+              </li>
+              <li>Token expires in 10 minutes - re-authenticate as needed</li>
+            </ul>
+
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>2. Drawing Forest Polygons</h4>
+            <ul style={{ marginLeft: '20px' }}>
+              <li>Click the polygon tool (pentagon icon) in the map's top-left control panel</li>
+              <li>Click on the map to place vertices of your forest boundary</li>
+              <li>Complete the polygon by clicking the first vertex again</li>
+              <li>Draw multiple forests to compare - click each to select for analysis</li>
+              <li>Use the trash icon to delete all polygons and start over</li>
+              <li><strong>Important:</strong> Draw polygons over actual forested areas visible in satellite imagery for accurate results</li>
+            </ul>
+
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>3. Forest Parameters</h4>
+            <ul style={{ marginLeft: '20px' }}>
+              <li><strong>Forest Type:</strong> Select species (Pine, Fir, Birch, Aspen) - affects growth curves and maximum biomass</li>
+              <li><strong>Forest Age:</strong> Estimated age of forest at the start of analysis period (default: 20 years)</li>
+              <li><strong>Default Parameters Source:</strong> Growth models calibrated with data from <strong>Luke (Finnish Natural Resources Institute)</strong>:
+                <ul style={{ marginTop: '5px' }}>
+                  <li>Pine: Max 450 t/ha, growth rate 0.08/year, NDVI saturation 0.85</li>
+                  <li>Fir: Max 500 t/ha, growth rate 0.07/year, NDVI saturation 0.88</li>
+                  <li>Birch: Max 300 t/ha, growth rate 0.12/year, NDVI saturation 0.82</li>
+                  <li>Aspen: Max 250 t/ha, growth rate 0.15/year, NDVI saturation 0.80</li>
+                </ul>
+              </li>
+            </ul>
+
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>4. Running Analysis</h4>
+            <ul style={{ marginLeft: '20px' }}>
+              <li>After authentication and polygon drawing, click "Analyze with Process API"</li>
+              <li>Processing retrieves all cloud-free Sentinel-2 acquisitions from summer months (June-August) for the past 10 years</li>
+              <li>Each acquisition is processed individually (~500ms per image) - expect 3-10 minutes for full analysis</li>
+              <li>Progress updates show current processing stage</li>
+            </ul>
+
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>5. Interpreting Results</h4>
+            <ul style={{ marginLeft: '20px' }}>
+              <li><strong>NDVI (Normalized Difference Vegetation Index):</strong>
+                <ul>
+                  <li>0.6-0.9: Healthy, dense forest vegetation</li>
+                  <li>0.3-0.6: Moderate vegetation/young forest</li>
+                  <li>0.1-0.3: Sparse vegetation/stressed forest</li>
+                  <li>&lt;0.1: Non-vegetated/water/bare soil</li>
+                </ul>
+              </li>
+              <li><strong>Biomass Estimates:</strong>
+                <ul>
+                  <li>Calculated using logistic growth model coupled with NDVI measurements</li>
+                  <li>Units: tons/hectare (dry biomass)</li>
+                  <li>Typical mature forest: 200-500 t/ha depending on species</li>
+                  <li>Annual growth: 5-20 t/ha/year for healthy forests</li>
+                </ul>
+              </li>
+              <li><strong>Chart Interpretation:</strong>
+                <ul>
+                  <li>Individual points: Daily satellite acquisitions (weather permitting)</li>
+                  <li>Thick lines: 7-day rolling averages (smooths atmospheric noise)</li>
+                  <li>Seasonal variations: Normal - highest NDVI/biomass in mid-summer</li>
+                  <li>Long-term trend: Should show steady increase for growing forests</li>
+                </ul>
+              </li>
+              <li><strong>Quality Indicators:</strong>
+                <ul>
+                  <li>Coverage %: Portion of polygon with valid (non-cloudy) data</li>
+                  <li>Vegetation %: Pixels classified as vegetated (&gt;80% expected for forests)</li>
+                  <li>Valid Pixels: Number of measurements used for statistics</li>
+                </ul>
+              </li>
+            </ul>
+
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>6. Troubleshooting</h4>
+            <ul style={{ marginLeft: '20px' }}>
+              <li><strong>Low NDVI values:</strong> Verify polygon is over forested area, not water/urban/agricultural land</li>
+              <li><strong>No data found:</strong> Area may have persistent cloud cover - try different location</li>
+              <li><strong>Authentication errors:</strong> Token expired (10min limit) or incorrect credentials</li>
+              <li><strong>CORS errors:</strong> Use manual token mode instead of direct authentication</li>
+            </ul>
+
+            <p style={{ marginTop: '15px', padding: '10px', backgroundColor: '#e8f5e9', borderRadius: '4px' }}>
+              <strong>💡 Tip:</strong> Start with a small test polygon (~10-50 hectares) to verify setup before analyzing larger areas. 
+              Export results as CSV for further analysis in Excel or R/Python.
+            </p>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -1248,7 +1359,7 @@ function evaluatePixel(sample) {
             Use manual token mode (if CORS blocks direct auth)
           </label>
         </div>
-        
+
         {!manualAuthMode ? (
           <div style={styles.controls}>
             <div>
@@ -1296,7 +1407,7 @@ function evaluatePixel(sample) {
             </p>
           </div>
         )}
-        
+
         {!manualAuthMode && (
           <button
             style={{
@@ -1309,7 +1420,7 @@ function evaluatePixel(sample) {
             {authenticated ? 'Authenticated' : 'Authenticate'}
           </button>
         )}
-        
+
         {authenticated && (
           <>
             <p style={{ color: '#28a745', marginTop: '10px' }}>
@@ -1328,16 +1439,6 @@ function evaluatePixel(sample) {
             </button>
           </>
         )}
-        
-        <div style={styles.note}>
-          <strong>FIXED: Compressed TIFF Support</strong>
-          <ul style={{ margin: '5px 0 0 20px', fontSize: '13px' }}>
-            <li>Integrated GeoTIFF.js library (v2.1.3) for compressed TIFF parsing</li>
-            <li>Supports DEFLATE, LZW, PACKBITS, ZLIB compression methods</li>
-            <li>Handles FLOAT32 single-band raster data correctly</li>
-            <li>Confirmed NDVI values now in expected -1 to 1 range</li>
-          </ul>
-        </div>
       </div>
 
       <div style={styles.controls}>
@@ -1453,7 +1554,7 @@ function evaluatePixel(sample) {
               Export CSV
             </button>
           </div>
-          
+
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={biomassData}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -1464,18 +1565,18 @@ function evaluatePixel(sample) {
                 textAnchor="end"
                 height={80}
               />
-              <YAxis 
-                yAxisId="biomass" 
-                orientation="left" 
-                label={{ value: 'Biomass (tons/ha)', angle: -90, position: 'insideLeft' }} 
+              <YAxis
+                yAxisId="biomass"
+                orientation="left"
+                label={{ value: 'Biomass (tons/ha)', angle: -90, position: 'insideLeft' }}
               />
-              <YAxis 
-                yAxisId="ndvi" 
-                orientation="right" 
-                label={{ value: 'NDVI', angle: 90, position: 'insideRight' }} 
+              <YAxis
+                yAxisId="ndvi"
+                orientation="right"
+                label={{ value: 'NDVI', angle: 90, position: 'insideRight' }}
                 domain={[-0.2, 1]}
               />
-              <Tooltip 
+              <Tooltip
                 formatter={(value, name) => {
                   if (name === 'Biomass') return [`${value.toFixed(1)} t/ha`, name];
                   if (name === 'NDVI') return [value.toFixed(3), name];
@@ -1489,7 +1590,7 @@ function evaluatePixel(sample) {
                 }}
               />
               <Legend />
-              
+
               <Line
                 yAxisId="biomass"
                 type="monotone"
@@ -1510,7 +1611,7 @@ function evaluatePixel(sample) {
                 dot={{ r: 2 }}
                 opacity={0.6}
               />
-              
+
               {/* Rolling average trend lines */}
               <Line
                 yAxisId="biomass"
@@ -1536,61 +1637,257 @@ function evaluatePixel(sample) {
           </ResponsiveContainer>
 
           <div style={styles.techDetails}>
-            <h3>Technical Implementation - Daily Acquisition Mode</h3>
-            
-            <h4>1. GeoTIFF.js Integration</h4>
-            <ul style={{ fontSize: '13px', marginLeft: '20px' }}>
-              <li><strong>Library:</strong> GeoTIFF.js v2.1.3 via CDN</li>
-              <li><strong>Compression Support:</strong> DEFLATE, LZW, PACKBITS, ZLIB, ZSTD</li>
-              <li><strong>Data Type:</strong> FLOAT32 single-band NDVI raster</li>
-              <li><strong>Async Parsing:</strong> fromArrayBuffer() → getImage() → readRasters()</li>
-              <li><strong>Memory Efficient:</strong> Handles compressed data without full decompression</li>
-            </ul>
-            
-            <h4>2. TIFF Processing Pipeline</h4>
-            <pre style={{ fontSize: '12px', backgroundColor: '#f5f5f5', padding: '10px', borderRadius: '4px' }}>
-{`// GeoTIFF.js implementation
-const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
-const image = await tiff.getImage();
-const width = image.getWidth();
-const height = image.getHeight();
-const compression = image.getCompression();
-const rasters = await image.readRasters();
-const ndviData = rasters[0]; // FLOAT32 array`}
-            </pre>
-            
-            <h4>3. Compression Efficiency</h4>
-            <ul style={{ fontSize: '13px', marginLeft: '20px' }}>
-              <li><strong>Uncompressed Size:</strong> 100x100 × 4 bytes = 40,000 bytes</li>
-              <li><strong>Compressed Size:</strong> ~18,754 bytes (53% reduction)</li>
-              <li><strong>Compression Method:</strong> Likely DEFLATE (Sentinel Hub default)</li>
-              <li><strong>Processing Time:</strong> &lt;100ms for decompression</li>
-            </ul>
-            
-            <h4>4. Current Analysis Results</h4>
+            <h3>Technical Implementation & Results</h3>
+
             {biomassData.length > 0 && (
-              <ul style={{ fontSize: '13px', marginLeft: '20px' }}>
-                <li><strong>Total Observations:</strong> {biomassData.length}</li>
-                <li><strong>Date Range:</strong> {biomassData[0].date} to {biomassData[biomassData.length-1].date}</li>
-                <li><strong>Mean Temporal Resolution:</strong> {(biomassData.length > 1 ? 
-                  (new Date(biomassData[biomassData.length-1].date) - new Date(biomassData[0].date)) / 
-                  (biomassData.length - 1) / 86400000 : 0).toFixed(1)} days</li>
-                <li><strong>Average NDVI:</strong> {(biomassData.reduce((sum, d) => sum + d.ndvi, 0) / biomassData.length).toFixed(3)}</li>
-                <li><strong>Biomass Range:</strong> {Math.min(...biomassData.map(d => d.biomass)).toFixed(1)} - {Math.max(...biomassData.map(d => d.biomass)).toFixed(1)} tons/ha</li>
-                <li><strong>Data Quality:</strong> {(biomassData.reduce((sum, d) => sum + parseFloat(d.coverage), 0) / biomassData.length).toFixed(1)}% average pixel coverage</li>
-              </ul>
+              <>
+                <h4>1. Current Analysis Metrics</h4>
+                <div style={{ backgroundColor: '#e8f4f8', padding: '15px', borderRadius: '6px', marginBottom: '20px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px', fontSize: '13px' }}>
+                    <div>
+                      <strong>Temporal Coverage</strong>
+                      <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                        <li>Total Acquisitions: {biomassData.length}</li>
+                        <li>Date Range: {biomassData[0].date} to {biomassData[biomassData.length - 1].date}</li>
+                        <li>Analysis Duration: {((new Date(biomassData[biomassData.length - 1].date) - new Date(biomassData[0].date)) / 31536000000).toFixed(1)} years</li>
+                        <li>Mean Revisit Time: {(biomassData.length > 1 ?
+                          (new Date(biomassData[biomassData.length - 1].date) - new Date(biomassData[0].date)) /
+                          (biomassData.length - 1) / 86400000 : 0).toFixed(1)} days</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <strong>NDVI Statistics</strong>
+                      <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                        <li>Mean NDVI: {(biomassData.reduce((sum, d) => sum + d.ndvi, 0) / biomassData.length).toFixed(4)}</li>
+                        <li>NDVI Range: {Math.min(...biomassData.map(d => d.ndvi)).toFixed(4)} to {Math.max(...biomassData.map(d => d.ndvi)).toFixed(4)}</li>
+                        <li>NDVI Std Dev: {(Math.sqrt(biomassData.reduce((sum, d) => sum + Math.pow(d.ndvi - biomassData.reduce((s, x) => s + x.ndvi, 0) / biomassData.length, 2), 0) / biomassData.length)).toFixed(4)}</li>
+                        <li>Vegetation Coverage: {(biomassData.filter(d => d.isForested).length / biomassData.length * 100).toFixed(1)}%</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <strong>Biomass Estimates</strong>
+                      <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                        <li>Current Biomass: {biomassData[biomassData.length - 1].biomass.toFixed(2)} tons/ha</li>
+                        <li>Initial Biomass: {biomassData[0].biomass.toFixed(2)} tons/ha</li>
+                        <li>Total Accumulation: {(biomassData[biomassData.length - 1].biomass - biomassData[0].biomass).toFixed(2)} tons/ha</li>
+                        <li>Annual Growth Rate: {((biomassData[biomassData.length - 1].biomass - biomassData[0].biomass) / ((new Date(biomassData[biomassData.length - 1].date) - new Date(biomassData[0].date)) / 31536000000)).toFixed(2)} tons/ha/year</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <strong>Data Quality Metrics</strong>
+                      <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                        <li>Mean Pixel Coverage: {(biomassData.reduce((sum, d) => sum + parseFloat(d.coverage), 0) / biomassData.length).toFixed(1)}%</li>
+                        <li>Valid Pixels/Acquisition: {Math.round(biomassData.reduce((sum, d) => sum + d.validPixels, 0) / biomassData.length)}</li>
+                        <li>Cloud-Free Acquisitions: {biomassData.filter(d => parseFloat(d.coverage) > 80).length} ({(biomassData.filter(d => parseFloat(d.coverage) > 80).length / biomassData.length * 100).toFixed(1)}%)</li>
+                        <li>Forest Area: {selectedForests[selectedForestIndex].area} ha</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </>
             )}
-            
-            <p style={{ fontSize: '12px', marginTop: '15px', color: '#666' }}>
-              <strong>Data Pipeline:</strong> Copernicus Data Space Ecosystem → Catalog API (acquisition discovery) → 
-              Process API (NDVI extraction with reflectance values) → Client-side TIFF parsing (GeoTIFF.js with compression support) → 
-              Time series analysis → Biomass modeling
+
+            <h4>2. Data Acquisition Pipeline</h4>
+            <div style={{ fontSize: '13px', marginBottom: '20px' }}>
+              <strong>A. Catalog API Integration</strong>
+              <pre style={{ backgroundColor: '#f5f5f5', padding: '10px', borderRadius: '4px', fontSize: '12px', overflow: 'auto' }}>
+                {`// Sentinel-2 acquisition discovery
+const catalogRequest = {
+  bbox: [${biomassData.length > 0 ?
+                    (() => {
+                      const coords = selectedForests[selectedForestIndex].coords.map(c => [c[1], c[0]]);
+                      const lons = coords.map(c => c[0]);
+                      const lats = coords.map(c => c[1]);
+                      return `${Math.min(...lons).toFixed(4)}, ${Math.min(...lats).toFixed(4)}, ${Math.max(...lons).toFixed(4)}, ${Math.max(...lats).toFixed(4)}`;
+                    })() : 'west, south, east, north'}],
+  datetime: "YYYY-06-01T00:00:00Z/YYYY-08-31T23:59:59Z",
+  collections: ["sentinel-2-l2a"],
+  filter: "eo:cloud_cover < 30"
+};
+// Returns: Array of available acquisition dates`}
+              </pre>
+
+              <strong>B. Process API Request Structure</strong>
+              <pre style={{ backgroundColor: '#f5f5f5', padding: '10px', borderRadius: '4px', fontSize: '12px', overflow: 'auto' }}>
+                {`// NDVI extraction with cloud masking
+{
+  input: {
+    bounds: {
+      bbox: [lon_min, lat_min, lon_max, lat_max],
+      properties: { crs: "http://www.opengis.net/def/crs/OGC/1.3/CRS84" },
+      geometry: geoJsonPolygon  // Exact forest boundary
+    },
+    data: [{
+      type: "sentinel-2-l2a",
+      dataFilter: {
+        timeRange: { from: acquisitionDate, to: nextDay },
+        maxCloudCoverage: 30,
+        mosaickingOrder: "leastCC"
+      }
+    }]
+  },
+  output: {
+    width: ${biomassData.length > 0 ?
+                    (() => {
+                      const coords = selectedForests[selectedForestIndex].coords.map(c => [c[1], c[0]]);
+                      const lons = coords.map(c => c[0]);
+                      const lats = coords.map(c => c[1]);
+                      const latDist = Math.abs(Math.max(...lats) - Math.min(...lats)) * 111000;
+                      const lonDist = Math.abs(Math.max(...lons) - Math.min(...lons)) * 111000 * Math.cos(((Math.min(...lats) + Math.max(...lats)) / 2) * Math.PI / 180);
+                      const maxDim = Math.max(latDist, lonDist);
+                      return maxDim < 1000 ? 50 : maxDim < 5000 ? 100 : maxDim < 20000 ? 200 : 300;
+                    })() : 'adaptive'},  // Adaptive resolution based on polygon size
+    height: ${biomassData.length > 0 ?
+                    (() => {
+                      const coords = selectedForests[selectedForestIndex].coords.map(c => [c[1], c[0]]);
+                      const lons = coords.map(c => c[0]);
+                      const lats = coords.map(c => c[1]);
+                      const latDist = Math.abs(Math.max(...lats) - Math.min(...lats)) * 111000;
+                      const lonDist = Math.abs(Math.max(...lons) - Math.min(...lons)) * 111000 * Math.cos(((Math.min(...lats) + Math.max(...lats)) / 2) * Math.PI / 180);
+                      const maxDim = Math.max(latDist, lonDist);
+                      return maxDim < 1000 ? 50 : maxDim < 5000 ? 100 : maxDim < 20000 ? 200 : 300;
+                    })() : 'adaptive'},
+    responses: [{ identifier: "default", format: { type: "image/tiff" } }]
+  },
+  evalscript: evalscriptNDVI  // See section C
+}`}
+              </pre>
+            </div>
+
+            <h4>3. NDVI Calculation & Cloud Masking</h4>
+            <pre style={{ backgroundColor: '#f5f5f5', padding: '10px', borderRadius: '4px', fontSize: '12px', marginBottom: '20px', overflow: 'auto' }}>
+              {`//VERSION=3
+function evaluatePixel(samples) {
+  // Scene Classification Layer (SCL) cloud masking
+  const SCL_CLOUD_MEDIUM = 8;
+  const SCL_CLOUD_HIGH = 9;
+  const SCL_THIN_CIRRUS = 10;
+  const SCL_SNOW_ICE = 11;
+  
+  // Filter invalid pixels
+  if (samples.dataMask === 0 || 
+      [SCL_CLOUD_MEDIUM, SCL_CLOUD_HIGH, SCL_THIN_CIRRUS, SCL_SNOW_ICE]
+        .includes(samples.SCL)) {
+    return [NaN];  // Masked pixels
+  }
+  
+  // NDVI = (NIR - Red) / (NIR + Red)
+  // B08 = NIR (842nm), B04 = Red (665nm)
+  const ndvi = (samples.B08 - samples.B04) / (samples.B08 + samples.B04 + 1e-10);
+  return [ndvi];  // FLOAT32 output
+}`}
+            </pre>
+
+            <h4>4. Biomass Estimation Model</h4>
+            <div style={{ fontSize: '13px', marginBottom: '20px' }}>
+              <strong>Logistic Growth Model with NDVI Coupling</strong>
+              <pre style={{ backgroundColor: '#f5f5f5', padding: '10px', borderRadius: '4px', fontSize: '12px', overflow: 'auto' }}>
+                {`// Forest-specific parameters
+const forestParams = {
+  ${forestType}: {
+    maxBiomass: ${forestParams[forestType].maxBiomass},      // Maximum biomass at maturity (tons/ha)
+    growthRate: ${forestParams[forestType].growthRate},      // Growth rate parameter (year⁻¹)
+    ndviSaturation: ${forestParams[forestType].ndviSaturation}, // NDVI at canopy closure
+    youngBiomass: ${forestParams[forestType].youngBiomass}      // Initial biomass (tons/ha)
+  }
+};
+
+// Biomass calculation
+function estimateBiomass(ndvi, forestType, yearsFromStart, initialAge) {
+  const params = forestParams[forestType];
+  const currentAge = initialAge + yearsFromStart;
+  
+  // Logistic growth factor: B(t) = K / (1 + e^(-r*t))
+  const growthFactor = 1 - Math.exp(-params.growthRate * currentAge);
+  
+  // NDVI adjustment factor (0 to 1)
+  const ndviFactor = Math.min(1, Math.max(0, ndvi) / params.ndviSaturation);
+  
+  // Final biomass estimate
+  return params.youngBiomass + 
+         (params.maxBiomass - params.youngBiomass) * growthFactor * ndviFactor;
+}`}
+              </pre>
+            </div>
+
+            <h4>5. GeoTIFF Processing Implementation</h4>
+            <pre style={{ backgroundColor: '#f5f5f5', padding: '10px', borderRadius: '4px', fontSize: '12px', marginBottom: '20px', overflow: 'auto' }}>
+              {`// Compressed TIFF parsing with GeoTIFF.js v2.1.3
+const tiff = await GeoTIFF.fromArrayBuffer(responseArrayBuffer);
+const image = await tiff.getImage();
+
+// Metadata extraction
+const width = image.getWidth();           // ${biomassData.length > 0 ?
+                  (() => {
+                    const coords = selectedForests[selectedForestIndex].coords.map(c => [c[1], c[0]]);
+                    const lons = coords.map(c => c[0]);
+                    const lats = coords.map(c => c[1]);
+                    const latDist = Math.abs(Math.max(...lats) - Math.min(...lats)) * 111000;
+                    const lonDist = Math.abs(Math.max(...lons) - Math.min(...lons)) * 111000 * Math.cos(((Math.min(...lats) + Math.max(...lats)) / 2) * Math.PI / 180);
+                    const maxDim = Math.max(latDist, lonDist);
+                    return maxDim < 1000 ? 50 : maxDim < 5000 ? 100 : maxDim < 20000 ? 200 : 300;
+                  })() : 'width'} pixels
+const height = image.getHeight();         // ${biomassData.length > 0 ?
+                  (() => {
+                    const coords = selectedForests[selectedForestIndex].coords.map(c => [c[1], c[0]]);
+                    const lons = coords.map(c => c[0]);
+                    const lats = coords.map(c => c[1]);
+                    const latDist = Math.abs(Math.max(...lats) - Math.min(...lats)) * 111000;
+                    const lonDist = Math.abs(Math.max(...lons) - Math.min(...lons)) * 111000 * Math.cos(((Math.min(...lats) + Math.max(...lats)) / 2) * Math.PI / 180);
+                    const maxDim = Math.max(latDist, lonDist);
+                    return maxDim < 1000 ? 50 : maxDim < 5000 ? 100 : maxDim < 20000 ? 200 : 300;
+                  })() : 'height'} pixels
+const compression = image.getCompression(); // DEFLATE/LZW/PACKBITS
+const sampleFormat = image.getSampleFormat(); // 3 = IEEE float
+
+// Raster data extraction
+const rasters = await image.readRasters();
+const ndviData = rasters[0]; // Float32Array
+
+// Validation & statistics
+const validPixels = ndviData.filter(v => !isNaN(v) && v >= -1 && v <= 1);
+const stats = {
+  mean: validPixels.reduce((a,b) => a+b, 0) / validPixels.length,
+  min: Math.min(...validPixels),
+  max: Math.max(...validPixels),
+  validCount: validPixels.length,
+  cloudMasked: ndviData.filter(v => isNaN(v)).length
+};`}
+            </pre>
+
+            <h4>6. Time Series Post-Processing</h4>
+            <div style={{ fontSize: '13px' }}>
+              <strong>Rolling Average Implementation (7-day window)</strong>
+              <pre style={{ backgroundColor: '#f5f5f5', padding: '10px', borderRadius: '4px', fontSize: '12px', overflow: 'auto' }}>
+                {`// Smoothing for noise reduction in daily acquisitions
+function calculateRollingAverage(data, key, windowSize = 7) {
+  return data.map((item, index) => {
+    const startIndex = Math.max(0, index - windowSize + 1);
+    const window = data.slice(startIndex, index + 1);
+    const average = window.reduce((sum, d) => sum + d[key], 0) / window.length;
+    
+    return { ...item, [\`\${key}RollingAvg\`]: average };
+  });
+}
+
+// Applied to both NDVI and biomass time series
+// Reduces noise from atmospheric conditions and sensor variations`}
+              </pre>
+            </div>
+
+            <p style={{ fontSize: '12px', marginTop: '20px', padding: '10px', backgroundColor: '#f0f8ff', borderRadius: '4px' }}>
+              <strong>Processing Summary:</strong> {biomassData.length > 0 ?
+                `Analyzed ${biomassData.length} Sentinel-2 acquisitions over ${((new Date(biomassData[biomassData.length - 1].date) - new Date(biomassData[0].date)) / 31536000000).toFixed(1)} years 
+                with ${(biomassData.reduce((sum, d) => sum + parseFloat(d.coverage), 0) / biomassData.length).toFixed(1)}% average cloud-free coverage. 
+                Biomass increased from ${biomassData[0].biomass.toFixed(1)} to ${biomassData[biomassData.length - 1].biomass.toFixed(1)} tons/ha, 
+                representing ${((biomassData[biomassData.length - 1].biomass - biomassData[0].biomass) / biomassData[0].biomass * 100).toFixed(1)}% growth.` :
+                'No analysis data available. Complete satellite data processing to view results.'}
             </p>
           </div>
         </div>
       )}
       <p style={{ fontSize: '12px', marginTop: '15px', color: '#666' }}>
-          <strong>Author:</strong> @robertkottelin at X
+        <strong>Author:</strong> @robertkottelin at X
       </p>
     </div>
   );
