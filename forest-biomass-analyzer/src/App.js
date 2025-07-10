@@ -1995,7 +1995,7 @@ const ndviArray = rasters[0];  // Float32Array`}
         </div>
       )}
       <p style={{ fontSize: '12px', marginTop: '15px', color: '#666' }}>
-        <strong>Author:</strong> <a href="https://x.com/robertkottelin" target="_blank" rel="noopener noreferrer">@robertkottelin at X</a>
+        <strong>Author:</strong> <a href="https://x.com/robertkottelin" target="_blank" rel="noopener noreferrer">@robertkottelin</a>
       </p>
       <p style={{ fontSize: '12px', color: '#666' }}>
         <strong>Source code:</strong> <a href="https://github.com/robertkottelin/biomass" target="_blank" rel="noopener noreferrer">Github</a>

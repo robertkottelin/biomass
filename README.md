@@ -230,6 +230,41 @@ The system includes multiple validation layers:
 - Minimum valid pixel requirements
 - Token expiration monitoring
 
+### How the Code Handles Data Retrieval
+- **API Endpoint**: The code sends POST requests to `https://sh.dataspace.copernicus.eu/api/v1/process` (in the `fetchNDVIData` function). This is the Process API, designed for custom processing of satellite data without downloading entire scenes.
+- **Input Specification**:
+  - It defines the input data collection as `sentinel-2-l2a` (atmospherically corrected Sentinel-2 Level-2A data).
+  - It specifies a bounding box (bbox) and exact polygon geometry for clipping.
+  - Time range is tightly constrained (e.g., a single day per acquisition to match available dates from the Catalog API).
+  - Filters like `maxCloudCoverage: 30` and `mosaickingOrder: "leastCC"` ensure low-cloud data is prioritized.
+- **Evalscript Processing**:
+  - The code includes a custom JavaScript evalscript (required for Process API requests) that runs on the server-side.
+  - This script requests specific bands: B04 (Red), B08 (Near-Infrared), SCL (Scene Classification Layer for cloud/snow/water masking), and dataMask.
+  - It computes NDVI for each pixel: `ndvi = (samples.B08 - samples.B04) / (samples.B08 + samples.B04 + 1e-10)`.
+  - It applies masks: Excludes cloudy/snowy pixels based on SCL values and sets them to NaN.
+  - Output: A single-band raster with FLOAT32 NDVI values (range: -1 to 1, with NaN for invalid pixels).
+- **Output Format**: The response is requested as `image/tiff` (GeoTIFF), with adaptive width/height (50x50 to 300x300 pixels based on polygon size for efficiency).
+- **Response Handling**:
+  - The fetch returns an ArrayBuffer of the GeoTIFF.
+  - GeoTIFF.js parses it to extract metadata (width, height) and the raster data (Float32Array of NDVI values).
+  - It filters out NaN, computes statistics (mean, min, max, land cover classifications), and discards invalid values.
+  - No full image is displayed or stored; only aggregated NDVI stats are used for biomass estimation.
+
+### Why This Isn't Fetching "Actual Images"
+- **On-the-Fly Processing**: The Process API does not download or return raw/full satellite scenes (which are large multi-band files, often gigabytes per scene). Instead, it processes the requested bands from the archived Sentinel-2 data on the server, applies the evalscript (e.g., NDVI calculation and masking), clips to the user's geometry/bbox, resamples to the specified resolution, and returns only the derived product.
+- **Efficiency Focus**: This approach avoids transferring unnecessary data. For example:
+  - Full Sentinel-2 scenes cover ~290km swaths with 13 bands at up to 10m resolution.
+  - The code requests tiny clips (e.g., 50-300 pixels) of a single computed band, resulting in small TIFF files (~10-100 KB per request).
+- **Catalog API Integration**: Before processing, it uses the Catalog API (`https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/search`) to find available acquisition dates with <30% cloud cover. This informs which dates to process but doesn't fetch any imagery.
+- **No Raw Data Download**: The code never accesses endpoints for full product downloads (e.g., Open Access Hub APIs for ZIP files). It relies entirely on processed outputs.
+
+### Supporting Evidence from Copernicus/Sentinel Hub Documentation
+- The Process API "generates images using satellite data for a user-specified area of interest, time range, processing, and visualization" without requiring full scene downloads.
+- Evalscripts define server-side computation (e.g., NDVI from bands), and outputs are customizable (e.g., TIFF with FLOAT32 samples).
+- Returned TIFFs are processed rasters: Single-band, compressed (DEFLATE/LZW), with values in the specified unit (reflectance by default, but computed NDVI here).
+- For Sentinel-2 L2A, bands like B04/B08 are inputs, but the API handles atmospheric correction and mosaicking internally.
+- This is optimized for derived products; full scenes would use different APIs (e.g., OData for direct downloads).
+
 # User Instructions
 
 ## 1. Authentication Setup
