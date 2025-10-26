@@ -201,7 +201,7 @@ const ForestBiomassApp = () => {
       console.log('Authenticating with Copernicus Data Space...');
 
       // Copernicus Data Space authentication endpoint
-      const tokenResponse = await fetch('https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token', {
+      const tokenResponse = await fetch('/api/auth/auth/realms/CDSE/protocol/openid-connect/token', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8'
@@ -305,7 +305,7 @@ function evaluatePixel(sample) {
       };
 
       console.log('Testing Process API endpoint...');
-      const response = await fetch('https://sh.dataspace.copernicus.eu/api/v1/process', {
+      const response = await fetch('/api/copernicus/api/v1/process', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -630,7 +630,7 @@ function evaluatePixel(sample) {
     console.log('CRS:', processRequest.input.bounds.properties.crs);
 
     try {
-      const response = await fetch('https://sh.dataspace.copernicus.eu/api/v1/process', {
+      const response = await fetch('/api/copernicus/api/v1/process', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -753,7 +753,7 @@ function evaluatePixel(sample) {
     };
 
     try {
-      const response = await fetch('https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/search', {
+      const response = await fetch('/api/copernicus/api/v1/catalog/1.0.0/search', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -814,6 +814,10 @@ function evaluatePixel(sample) {
       const results = [];
       const startYear = currentYear - 10;
 
+      // Calculate forest age at the start of analysis period
+      // User enters current age, we calculate age 10 years ago
+      const ageAtAnalysisStart = forestAge - 10;
+
       // Calculate bbox from polygon
       const coords = selectedForest.coords.map(coord => [coord[1], coord[0]]); // [lng, lat]
       const lons = coords.map(c => c[0]);
@@ -873,7 +877,7 @@ function evaluatePixel(sample) {
               const dayOfYear = Math.floor((dateTime - new Date(year, 0, 0)) / 86400000);
               const fractionalYear = yearsFromStart + (dayOfYear / 365);
 
-              const biomass = estimateBiomass(avgNDVI, selectedForest.type, fractionalYear, forestAge);
+              const biomass = estimateBiomass(avgNDVI, selectedForest.type, fractionalYear, ageAtAnalysisStart);
 
               results.push({
                 date: acquisitionDate,
@@ -885,7 +889,7 @@ function evaluatePixel(sample) {
                 ndviMin: ndviStats.min,
                 ndviMax: ndviStats.max,
                 biomass,
-                forestAge: forestAge + fractionalYear,
+                forestAge: ageAtAnalysisStart + fractionalYear,
                 validPixels: ndviStats.validPixels,
                 totalPixels: ndviStats.totalPixels,
                 coverage: (ndviStats.validPixels / ndviStats.totalPixels * 100).toFixed(1),
@@ -1285,7 +1289,7 @@ function evaluatePixel(sample) {
             <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>3. Forest Parameters</h4>
             <ul style={{ marginLeft: '20px' }}>
               <li><strong>Forest Type:</strong> Select species (Pine, Fir, Birch, Aspen) - affects growth curves and maximum biomass</li>
-              <li><strong>Forest Age:</strong> Estimated age of forest at the start of analysis period (default: 20 years)</li>
+              <li><strong>Forest Age:</strong> Current age of the forest as of today. The app automatically calculates the age at the start of the 10-year analysis period. (Example: if planted in 2000, enter 25 for year 2025)</li>
               <li><strong>Default Parameters Source:</strong> Growth models calibrated with data from <strong>Luke (Finnish Natural Resources Institute)</strong>:
                 <ul style={{ marginTop: '5px' }}>
                   <li>Pine: Max 450 t/ha, growth rate 0.08/year, NDVI saturation 0.85</li>
@@ -1752,15 +1756,19 @@ const ndviArray = rasters[0];  // Float32Array`}
           </select>
         </div>
         <div>
-          <label style={styles.label}>Forest Age (years at start)</label>
+          <label style={styles.label}>Current Forest Age (years)</label>
           <input
             style={styles.input}
             type="number"
-            min="1"
+            min="11"
             max="100"
             value={forestAge}
             onChange={(e) => setForestAge(parseInt(e.target.value) || 20)}
+            title="Enter the current age of the forest (e.g., if planted in 2000, enter 25 for year 2025)"
           />
+          <p style={{ fontSize: '12px', color: '#666', margin: '5px 0 0 0' }}>
+            Enter age as of {new Date().getFullYear()}. Analysis covers the last 10 years. (Min: 11 years)
+          </p>
         </div>
       </div>
 
@@ -1825,7 +1833,7 @@ const ndviArray = rasters[0];  // Float32Array`}
               <h3>Forest #{idx + 1}</h3>
               <p><strong>Type:</strong> {forest.type}</p>
               <p><strong>Area:</strong> {forest.area} hectares</p>
-              <p><strong>Initial Age:</strong> {forestAge} years</p>
+              <p><strong>Current Age:</strong> {forestAge} years</p>
             </div>
           ))}
         </div>
