@@ -33,11 +33,9 @@ const loadGeoTIFF = () => {
     script.src = 'https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js';
     document.head.appendChild(script);
     script.onload = () => {
-      console.log('GeoTIFF.js loaded successfully');
       resolve();
     };
     script.onerror = () => {
-      console.error('Failed to load GeoTIFF.js');
       resolve(); // Continue anyway
     };
   });
@@ -167,7 +165,7 @@ const ForestBiomassApp = () => {
   // Load GeometryUtil and GeoTIFF on mount
   useEffect(() => {
     Promise.all([loadGeometryUtil(), loadGeoTIFF()]).then(() => {
-      console.log('Libraries loaded');
+      // Libraries loaded
     });
   }, []);
 
@@ -198,8 +196,6 @@ const ForestBiomassApp = () => {
       tokenData.append('client_secret', clientSecret);
       tokenData.append('grant_type', 'client_credentials');
 
-      console.log('Authenticating with Copernicus Data Space...');
-
       // Copernicus Data Space authentication endpoint
       const tokenResponse = await fetch('/api/auth/auth/realms/CDSE/protocol/openid-connect/token', {
         method: 'POST',
@@ -212,8 +208,6 @@ const ForestBiomassApp = () => {
       const responseText = await tokenResponse.text();
 
       if (!tokenResponse.ok) {
-        console.error('Authentication failed:', tokenResponse.status, responseText);
-
         // Parse error details if available
         try {
           const errorData = JSON.parse(responseText);
@@ -233,11 +227,6 @@ const ForestBiomassApp = () => {
         throw new Error('No access token received');
       }
 
-      console.log('Authentication successful');
-      console.log('Token type:', tokenResult.token_type);
-      console.log('Token expires in:', tokenResult.expires_in, 'seconds');
-      console.log('Token first 20 chars:', tokenResult.access_token.substring(0, 20) + '...');
-
       setAccessToken(tokenResult.access_token);
       setTokenExpiry(Date.now() + ((tokenResult.expires_in - 60) * 1000));
       setAuthenticated(true);
@@ -245,7 +234,6 @@ const ForestBiomassApp = () => {
 
       return true;
     } catch (err) {
-      console.error('Authentication error:', err);
       setError(`Authentication failed: ${err.message}. Use manual token mode if CORS is blocking.`);
       setProcessingStatus('');
       return false;
@@ -304,7 +292,6 @@ function evaluatePixel(sample) {
 }`
       };
 
-      console.log('Testing Process API endpoint...');
       const response = await fetch('/api/copernicus/api/v1/process', {
         method: 'POST',
         headers: {
@@ -314,8 +301,6 @@ function evaluatePixel(sample) {
         },
         body: JSON.stringify(testRequest)
       });
-
-      console.log('Process API Response Status:', response.status);
 
       if (response.ok) {
         setProcessingStatus('');
@@ -455,8 +440,6 @@ function evaluatePixel(sample) {
       }
     }
 
-    console.log(`TIFF metadata: ${imageWidth}x${imageHeight}, ${bitsPerSample} bits, format=${sampleFormat}, endian=${littleEndian ? 'little' : 'big'}`);
-
     // Read pixel data
     const pixelCount = imageWidth * imageHeight;
     const pixels = new Float32Array(pixelCount);
@@ -514,13 +497,6 @@ function evaluatePixel(sample) {
       Math.max(...lats)  // north (max latitude)
     ];
 
-    // Log coordinate verification
-    console.log('=== COORDINATE VERIFICATION ===');
-    console.log('Original polygon (lat,lng):', polygon.coords.slice(0, 3).map(c => `[${c[0].toFixed(6)}, ${c[1].toFixed(6)}]`).join(', '));
-    console.log('Transformed (lng,lat):', coords.slice(0, 3).map(c => `[${c[0].toFixed(6)}, ${c[1].toFixed(6)}]`).join(', '));
-    console.log('Bounding box [W,S,E,N]:', bbox.map(v => v.toFixed(6)).join(', '));
-    console.log('GeoJSON polygon vertices:', geoJsonCoords.length);
-
     // Calculate resolution based on polygon size
     const latDistance = Math.abs(bbox[3] - bbox[1]) * 111000; // meters
     const lonDistance = Math.abs(bbox[2] - bbox[0]) * 111000 * Math.cos(((bbox[1] + bbox[3]) / 2) * Math.PI / 180);
@@ -537,9 +513,6 @@ function evaluatePixel(sample) {
     } else {
       pixelWidth = pixelHeight = 300; // 300x300 pixels for large areas
     }
-
-    console.log(`Polygon dimensions: ${(latDistance / 1000).toFixed(1)}km x ${(lonDistance / 1000).toFixed(1)}km`);
-    console.log(`Using resolution: ${pixelWidth}x${pixelHeight} pixels`);
 
     // FIXED evalscript - removed units specification to get reflectance by default
     const evalscript = `
@@ -622,13 +595,6 @@ function evaluatePixel(sample) {
       evalscript: evalscript
     };
 
-    console.log('=== PROCESS API REQUEST ===');
-    console.log('Date range:', dateFrom, 'to', dateTo);
-    console.log('Bbox [W,S,E,N]:', bbox);
-    console.log('Output size:', pixelWidth, 'x', pixelHeight);
-    console.log('Geometry type:', processRequest.input.bounds.geometry.type);
-    console.log('CRS:', processRequest.input.bounds.properties.crs);
-
     try {
       const response = await fetch('/api/copernicus/api/v1/process', {
         method: 'POST',
@@ -642,13 +608,11 @@ function evaluatePixel(sample) {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Process API error:', response.status, errorText);
         throw new Error(`Process API error: ${response.status} - ${errorText}`);
       }
 
       // Parse TIFF response using GeoTIFF.js
       const arrayBuffer = await response.arrayBuffer();
-      console.log('Received TIFF data:', arrayBuffer.byteLength, 'bytes');
 
       // Use GeoTIFF.js for proper compressed TIFF parsing
       let ndviValues = [];
@@ -662,8 +626,6 @@ function evaluatePixel(sample) {
           const width = image.getWidth();
           const height = image.getHeight();
           const samplesPerPixel = image.getSamplesPerPixel();
-
-          console.log(`TIFF metadata: ${width}x${height}, ${samplesPerPixel} bands`);
 
           // Read raster data
           const rasters = await image.readRasters();
@@ -679,16 +641,10 @@ function evaluatePixel(sample) {
               nanCount++;
             } else if (value >= -1.0 && value <= 1.0) {
               ndviValues.push(value);
-            } else {
-              console.warn(`Unexpected NDVI value at pixel ${i}: ${value}`);
             }
           }
 
-          console.log(`Parsed ${ndviValues.length} valid NDVI values from ${data.length} total pixels using GeoTIFF.js`);
-          console.log(`NaN values (masked/cloudy): ${nanCount}`);
-
         } catch (geoTiffError) {
-          console.error('GeoTIFF.js parsing error:', geoTiffError);
           throw new Error('Failed to parse TIFF with GeoTIFF.js: ' + geoTiffError.message);
         }
       } else {
@@ -696,7 +652,6 @@ function evaluatePixel(sample) {
       }
 
       if (ndviValues.length === 0) {
-        console.error('No valid NDVI values extracted from TIFF');
         return null;
       }
 
@@ -711,21 +666,6 @@ function evaluatePixel(sample) {
       const barePixels = ndviValues.filter(v => v >= 0 && v <= 0.2).length;
       const waterPixels = ndviValues.filter(v => v < 0).length;
 
-      console.log(`=== NDVI DATA VERIFICATION ===`);
-      console.log(`Total valid pixels: ${ndviValues.length}/${pixelWidth * pixelHeight} (${(ndviValues.length / (pixelWidth * pixelHeight) * 100).toFixed(1)}%)`);
-      console.log(`NDVI Statistics: mean=${mean.toFixed(3)}, min=${min.toFixed(3)}, max=${max.toFixed(3)}`);
-      console.log(`Land Cover Classification:`);
-      console.log(`- Dense Vegetation (>0.3): ${vegetationPixels} pixels (${(vegetationPixels / ndviValues.length * 100).toFixed(1)}%)`);
-      console.log(`- Sparse Vegetation (0.2-0.3): ${moderateVegPixels} pixels (${(moderateVegPixels / ndviValues.length * 100).toFixed(1)}%)`);
-      console.log(`- Bare/Urban (0-0.2): ${barePixels} pixels (${(barePixels / ndviValues.length * 100).toFixed(1)}%)`);
-      console.log(`- Water (<0): ${waterPixels} pixels (${(waterPixels / ndviValues.length * 100).toFixed(1)}%)`);
-
-      // Area suitability check
-      if (mean < 0.2 && vegetationPixels < ndviValues.length * 0.1) {
-        console.warn('⚠️ AREA NOT SUITABLE FOR FOREST ANALYSIS - NDVI too low');
-        console.warn('→ Please select a polygon over forested area (expected NDVI > 0.3 for majority of pixels)');
-      }
-
       return {
         mean: mean,
         min: min,
@@ -737,7 +677,6 @@ function evaluatePixel(sample) {
       };
 
     } catch (error) {
-      console.error('Error fetching NDVI data:', error);
       throw error;
     }
   };
@@ -779,7 +718,6 @@ function evaluatePixel(sample) {
 
       return Array.from(dates).sort();
     } catch (error) {
-      console.error('Error fetching catalog data:', error);
       return [];
     }
   };
@@ -845,7 +783,6 @@ function evaluatePixel(sample) {
           if (today < endOfAugust) {
             // Use current date as end date
             dateTo = today.toISOString().split('T')[0];
-            console.log(`Current year ${year}: limiting analysis to current date ${dateTo}`);
           }
         }
 
@@ -853,7 +790,6 @@ function evaluatePixel(sample) {
 
         // Get available acquisition dates from Catalog API
         const availableDates = await fetchAvailableDates(bbox, dateFrom, dateTo);
-        console.log(`Found ${availableDates.length} acquisitions for ${year} summer`);
 
         // Process each available date
         for (let i = 0; i < availableDates.length; i++) {
@@ -899,7 +835,6 @@ function evaluatePixel(sample) {
               });
             }
           } catch (dateError) {
-            console.error(`Error processing ${acquisitionDate}:`, dateError);
             // Continue with next date
           }
 
@@ -919,9 +854,6 @@ function evaluatePixel(sample) {
       // Sort by date
       results.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-      console.log(`Total acquisitions processed: ${results.length}`);
-      console.log(`Date range: ${results[0].date} to ${results[results.length - 1].date}`);
-
       // Calculate rolling averages with larger window for daily data
       const resultsWithRollingAvg = calculateRollingAverage(results, 'biomass', 7);
       const finalResults = calculateRollingAverage(resultsWithRollingAvg, 'ndvi', 7);
@@ -932,7 +864,6 @@ function evaluatePixel(sample) {
       // Vegetation coverage analysis
       const vegetatedCount = finalResults.filter(d => d.isForested).length;
       const vegPercent = (vegetatedCount / finalResults.length * 100).toFixed(1);
-      console.log(`Vegetation coverage across time series: ${vegPercent}%`);
 
       if (vegetatedCount < finalResults.length * 0.5) {
         setError(`Warning: Low vegetation detected in ${100 - vegPercent}% of observations. Please verify forest area selection.`);
