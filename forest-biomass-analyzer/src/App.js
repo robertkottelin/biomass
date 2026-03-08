@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, FeatureGroup, Polygon, useMap } from 'react-leaflet';
 import { Line, LineChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { estimateTreeCount } from './treeEstimation';
+import { analyzeForestHealth } from './healthEstimation';
+import { estimateBiomass, calculateRollingAverage, forestParams } from './dataProcessing';
 import 'leaflet/dist/leaflet.css';
 
 // Fix Leaflet icon issue
@@ -132,35 +135,10 @@ const ForestBiomassApp = () => {
   const mapRef = useRef();
   const [showInstructions, setShowInstructions] = useState(false);
   const [showDocumentation, setShowDocumentation] = useState(false);
+  const [treeEstimate, setTreeEstimate] = useState(null);
+  const [healthEstimate, setHealthEstimate] = useState(null);
 
 
-  // Forest parameters with growth curves based on scientific literature
-  const forestParams = {
-    pine: {
-      maxBiomass: 450,      // Maximum biomass (tons/ha) at maturity
-      growthRate: 0.08,     // Growth rate parameter
-      ndviSaturation: 0.85, // NDVI saturation level for mature forest
-      youngBiomass: 20      // Initial biomass for young forest
-    },
-    fir: {
-      maxBiomass: 500,
-      growthRate: 0.07,
-      ndviSaturation: 0.88,
-      youngBiomass: 25
-    },
-    birch: {
-      maxBiomass: 300,
-      growthRate: 0.12,
-      ndviSaturation: 0.82,
-      youngBiomass: 15
-    },
-    aspen: {
-      maxBiomass: 250,
-      growthRate: 0.15,
-      ndviSaturation: 0.80,
-      youngBiomass: 12
-    }
-  };
 
   // Load GeometryUtil and GeoTIFF on mount
   useEffect(() => {
@@ -326,44 +304,6 @@ function evaluatePixel(sample) {
     }
   };
 
-  const estimateBiomass = (ndvi, forestType, yearsFromStart, currentForestAge) => {
-    const params = forestParams[forestType];
-
-    // For water bodies (negative NDVI), return 0 biomass
-    if (ndvi < 0) {
-      return 0;
-    }
-
-    // Logistic growth model for forest biomass accumulation
-    const currentAge = currentForestAge + yearsFromStart;
-    const growthFactor = 1 - Math.exp(-params.growthRate * currentAge);
-
-    // NDVI-based adjustment factor (accounts for vegetation health/density)
-    const ndviNormalized = Math.max(0, ndvi) / params.ndviSaturation;
-    const ndviFactor = Math.min(1, ndviNormalized);
-
-    // Calculate biomass combining growth model and NDVI
-    const biomass = params.youngBiomass +
-      (params.maxBiomass - params.youngBiomass) * growthFactor * ndviFactor;
-
-    return Math.max(0, biomass);
-  };
-
-  // Calculate rolling average with specified window size
-  const calculateRollingAverage = (data, key, windowSize) => {
-    return data.map((item, index) => {
-      const startIndex = Math.max(0, index - windowSize + 1);
-      const windowData = data.slice(startIndex, index + 1);
-
-      const sum = windowData.reduce((acc, d) => acc + d[key], 0);
-      const average = sum / windowData.length;
-
-      return {
-        ...item,
-        [`${key}RollingAvg`]: average
-      };
-    });
-  };
 
   // Simplified TIFF parser for FLOAT32 single-band data
   const parseTIFF = (arrayBuffer) => {
@@ -514,49 +454,45 @@ function evaluatePixel(sample) {
       pixelWidth = pixelHeight = 300; // 300x300 pixels for large areas
     }
 
-    // FIXED evalscript - removed units specification to get reflectance by default
+    // Multi-band evalscript: NDVI, NDMI (moisture), NDRE (red edge/chlorophyll)
     const evalscript = `
       //VERSION=3
       function setup() {
         return {
           input: [{
-            bands: ["B04", "B08", "SCL", "dataMask"]
+            bands: ["B04", "B05", "B08", "B11", "SCL", "dataMask"]
           }],
           output: {
             id: "default",
-            bands: 1,
+            bands: 3,
             sampleType: "FLOAT32"
           }
         };
       }
-      
+
       function evaluatePixel(samples) {
-        // Scene Classification values
-        const SCL_VEGETATION = 4;
-        const SCL_NOT_VEGETATED = 5;
-        const SCL_WATER = 6;
         const SCL_CLOUD_MEDIUM = 8;
         const SCL_CLOUD_HIGH = 9;
         const SCL_THIN_CIRRUS = 10;
         const SCL_SNOW_ICE = 11;
-        
-        // Check if pixel is valid
+
         if (samples.dataMask === 0) {
-          return [NaN];
+          return [NaN, NaN, NaN];
         }
-        
-        // Filter out clouds and snow
-        if (samples.SCL === SCL_CLOUD_MEDIUM || 
-            samples.SCL === SCL_CLOUD_HIGH || 
+
+        if (samples.SCL === SCL_CLOUD_MEDIUM ||
+            samples.SCL === SCL_CLOUD_HIGH ||
             samples.SCL === SCL_THIN_CIRRUS ||
             samples.SCL === SCL_SNOW_ICE) {
-          return [NaN];
+          return [NaN, NaN, NaN];
         }
-        
-        // Calculate NDVI from reflectance values (default unit)
-        const ndvi = (samples.B08 - samples.B04) / (samples.B08 + samples.B04 + 1e-10);
-        
-        return [ndvi];
+
+        const eps = 1e-10;
+        const ndvi = (samples.B08 - samples.B04) / (samples.B08 + samples.B04 + eps);
+        const ndmi = (samples.B08 - samples.B11) / (samples.B08 + samples.B11 + eps);
+        const ndre = (samples.B08 - samples.B05) / (samples.B08 + samples.B05 + eps);
+
+        return [ndvi, ndmi, ndre];
       }
     `;
 
@@ -614,33 +550,31 @@ function evaluatePixel(sample) {
       // Parse TIFF response using GeoTIFF.js
       const arrayBuffer = await response.arrayBuffer();
 
-      // Use GeoTIFF.js for proper compressed TIFF parsing
+      // Use GeoTIFF.js for proper compressed TIFF parsing (3 bands: NDVI, NDMI, NDRE)
       let ndviValues = [];
+      let ndmiValues = [];
+      let ndreValues = [];
 
       if (window.GeoTIFF) {
         try {
           const tiff = await window.GeoTIFF.fromArrayBuffer(arrayBuffer);
           const image = await tiff.getImage();
 
-          // Get image metadata
-          const width = image.getWidth();
-          const height = image.getHeight();
-          const samplesPerPixel = image.getSamplesPerPixel();
-
-          // Read raster data
+          // Read all raster bands
           const rasters = await image.readRasters();
-          const data = rasters[0]; // First band contains NDVI values
+          const ndviBand = rasters[0];
+          const ndmiBand = rasters[1];
+          const ndreBand = rasters[2];
 
-          // Extract valid NDVI values
-          let nanCount = 0;
-
-          for (let i = 0; i < data.length; i++) {
-            const value = data[i];
-
-            if (isNaN(value)) {
-              nanCount++;
-            } else if (value >= -1.0 && value <= 1.0) {
-              ndviValues.push(value);
+          // Extract valid pixel values (all bands in lockstep)
+          for (let i = 0; i < ndviBand.length; i++) {
+            const ndviVal = ndviBand[i];
+            if (!isNaN(ndviVal) && ndviVal >= -1.0 && ndviVal <= 1.0) {
+              ndviValues.push(ndviVal);
+              const ndmiVal = ndmiBand ? ndmiBand[i] : NaN;
+              const ndreVal = ndreBand ? ndreBand[i] : NaN;
+              ndmiValues.push(!isNaN(ndmiVal) && ndmiVal >= -1.0 && ndmiVal <= 1.0 ? ndmiVal : 0);
+              ndreValues.push(!isNaN(ndreVal) && ndreVal >= -1.0 && ndreVal <= 1.0 ? ndreVal : 0);
             }
           }
 
@@ -659,21 +593,25 @@ function evaluatePixel(sample) {
       const mean = ndviValues.reduce((a, b) => a + b, 0) / ndviValues.length;
       const min = Math.min(...ndviValues);
       const max = Math.max(...ndviValues);
+      const ndmiMean = ndmiValues.length > 0 ? ndmiValues.reduce((a, b) => a + b, 0) / ndmiValues.length : 0;
+      const ndreMean = ndreValues.length > 0 ? ndreValues.reduce((a, b) => a + b, 0) / ndreValues.length : 0;
 
       // Land cover analysis
       const vegetationPixels = ndviValues.filter(v => v > 0.3).length;
-      const moderateVegPixels = ndviValues.filter(v => v > 0.2 && v <= 0.3).length;
-      const barePixels = ndviValues.filter(v => v >= 0 && v <= 0.2).length;
-      const waterPixels = ndviValues.filter(v => v < 0).length;
 
       return {
         mean: mean,
         min: min,
         max: max,
+        ndmiMean: ndmiMean,
+        ndreMean: ndreMean,
         validPixels: ndviValues.length,
         totalPixels: pixelWidth * pixelHeight,
         vegetationPixels: vegetationPixels,
-        vegetationPercent: (vegetationPixels / ndviValues.length * 100)
+        vegetationPercent: (vegetationPixels / ndviValues.length * 100),
+        ndviValues: ndviValues,
+        ndmiValues: ndmiValues,
+        ndreValues: ndreValues
       };
 
     } catch (error) {
@@ -750,6 +688,7 @@ function evaluatePixel(sample) {
       const currentYear = currentDate.getFullYear();
       const currentMonth = currentDate.getMonth() + 1;
       const results = [];
+      let latestNdviValues = null;
       const startYear = currentYear - 10;
 
       // Calculate forest age at the start of analysis period
@@ -815,6 +754,9 @@ function evaluatePixel(sample) {
 
               const biomass = estimateBiomass(avgNDVI, selectedForest.type, fractionalYear, ageAtAnalysisStart);
 
+              // Keep the latest NDVI pixel values for tree estimation
+              latestNdviValues = ndviStats.ndviValues;
+
               results.push({
                 date: acquisitionDate,
                 year,
@@ -824,6 +766,8 @@ function evaluatePixel(sample) {
                 ndvi: avgNDVI,
                 ndviMin: ndviStats.min,
                 ndviMax: ndviStats.max,
+                ndmi: ndviStats.ndmiMean,
+                ndre: ndviStats.ndreMean,
                 biomass,
                 forestAge: ageAtAnalysisStart + fractionalYear,
                 validPixels: ndviStats.validPixels,
@@ -855,10 +799,31 @@ function evaluatePixel(sample) {
       results.sort((a, b) => new Date(a.date) - new Date(b.date));
 
       // Calculate rolling averages with larger window for daily data
-      const resultsWithRollingAvg = calculateRollingAverage(results, 'biomass', 7);
-      const finalResults = calculateRollingAverage(resultsWithRollingAvg, 'ndvi', 7);
+      let withRolling = calculateRollingAverage(results, 'biomass', 7);
+      withRolling = calculateRollingAverage(withRolling, 'ndvi', 7);
+      withRolling = calculateRollingAverage(withRolling, 'ndmi', 7);
+      const finalResults = calculateRollingAverage(withRolling, 'ndre', 7);
 
       setBiomassData(finalResults);
+
+      // Estimate tree count from the most recent acquisition's NDVI pixels
+      if (latestNdviValues && latestNdviValues.length > 0) {
+        const latestResult = finalResults[finalResults.length - 1];
+        const treeEst = estimateTreeCount(
+          latestNdviValues,
+          selectedForest.type,
+          latestResult.forestAge,
+          selectedForest.area
+        );
+        setTreeEstimate(treeEst);
+      } else {
+        setTreeEstimate(null);
+      }
+
+      // Forest health analysis
+      const healthResult = analyzeForestHealth(finalResults, selectedForest.type, forestAge);
+      setHealthEstimate(healthResult);
+
       setProcessingStatus('');
 
       // Vegetation coverage analysis
@@ -954,7 +919,17 @@ function evaluatePixel(sample) {
       'Coverage (%)',
       'Vegetation Coverage (%)',
       'Is Water Body',
-      'Is Forested'
+      'Is Forested',
+      'Estimated Trees',
+      'Trees Per Hectare',
+      'Canopy Cover (%)',
+      'NDMI Mean',
+      'NDRE Mean',
+      'NDMI 7-Day Rolling Avg',
+      'NDRE 7-Day Rolling Avg',
+      'Health Score',
+      'Stress Type',
+      'Stress Severity'
     ];
 
     const csvRows = biomassData.map(row => [
@@ -977,7 +952,17 @@ function evaluatePixel(sample) {
       row.coverage || 'N/A',
       row.vegetationPercent || 'N/A',
       row.isWater ? 'Yes' : 'No',
-      row.isForested ? 'Yes' : 'No'
+      row.isForested ? 'Yes' : 'No',
+      treeEstimate ? treeEstimate.count : 'N/A',
+      treeEstimate ? treeEstimate.treesPerHa : 'N/A',
+      treeEstimate ? treeEstimate.canopyCover : 'N/A',
+      row.ndmi != null ? row.ndmi.toFixed(4) : 'N/A',
+      row.ndre != null ? row.ndre.toFixed(4) : 'N/A',
+      row.ndmiRollingAvg != null ? row.ndmiRollingAvg.toFixed(4) : 'N/A',
+      row.ndreRollingAvg != null ? row.ndreRollingAvg.toFixed(4) : 'N/A',
+      healthEstimate ? healthEstimate.healthScore : 'N/A',
+      healthEstimate?.perAcquisitionStress?.find(s => s.date === row.date)?.stress?.type || 'N/A',
+      healthEstimate?.perAcquisitionStress?.find(s => s.date === row.date)?.stress?.severity || 'N/A'
     ]);
 
     const csvContent = [
@@ -1817,6 +1802,8 @@ const ndviArray = rasters[0];  // Float32Array`}
                   if (name === 'NDVI') return [value.toFixed(3), name];
                   if (name === 'Biomass Trend (7d)') return [`${value.toFixed(1)} t/ha`, name];
                   if (name === 'NDVI Trend (7d)') return [value.toFixed(3), name];
+                  if (name === 'NDMI' || name === 'NDMI Trend (7d)') return [value.toFixed(3), name];
+                  if (name === 'NDRE' || name === 'NDRE Trend (7d)') return [value.toFixed(3), name];
                   return [value, name];
                 }}
                 labelFormatter={(label) => {
@@ -1866,6 +1853,28 @@ const ndviArray = rasters[0];  // Float32Array`}
                 name="NDVI Trend (7d)"
                 strokeWidth={3}
                 strokeDasharray="0"
+                dot={false}
+              />
+
+              {/* NDMI (moisture) and NDRE (red edge) trend lines */}
+              <Line
+                yAxisId="ndvi"
+                type="monotone"
+                dataKey="ndmiRollingAvg"
+                stroke="#ff7f0e"
+                name="NDMI Trend (7d)"
+                strokeWidth={2}
+                strokeDasharray="5 5"
+                dot={false}
+              />
+              <Line
+                yAxisId="ndvi"
+                type="monotone"
+                dataKey="ndreRollingAvg"
+                stroke="#d62728"
+                name="NDRE Trend (7d)"
+                strokeWidth={2}
+                strokeDasharray="5 5"
                 dot={false}
               />
             </LineChart>
@@ -1918,6 +1927,124 @@ const ndviArray = rasters[0];  // Float32Array`}
                       </ul>
                     </div>
                   </div>
+                </div>
+              </>
+            )}
+
+            {treeEstimate && (
+              <>
+                <h4>2. Estimated Tree Count</h4>
+                <div style={{ backgroundColor: '#e8f8e8', padding: '15px', borderRadius: '6px', marginBottom: '20px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px', fontSize: '13px' }}>
+                    <div>
+                      <strong>Tree Density Estimate</strong>
+                      <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                        <li>Estimated Trees: <strong>{treeEstimate.count.toLocaleString()}</strong></li>
+                        <li>Confidence Range: {treeEstimate.countMin.toLocaleString()} – {treeEstimate.countMax.toLocaleString()}</li>
+                        <li>Trees per Hectare: {treeEstimate.treesPerHa.toLocaleString()}</li>
+                        <li>Density Range: {treeEstimate.treesPerHaMin.toLocaleString()} – {treeEstimate.treesPerHaMax.toLocaleString()} /ha</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <strong>Canopy Parameters</strong>
+                      <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                        <li>Canopy Cover: {treeEstimate.canopyCover}%</li>
+                        <li>Mean Crown Diameter: {treeEstimate.meanCrownDiameter} m</li>
+                        <li>Crown Area: {treeEstimate.crownArea} m²</li>
+                        <li>Packing Factor: {treeEstimate.packingFactor}</li>
+                      </ul>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
+                    Estimated using forestry allometric models (crown diameter × canopy cover). Sentinel-2 at 10m resolution
+                    cannot resolve individual trees — this is a statistical estimate based on species, age, and NDVI-derived canopy cover (±30% uncertainty).
+                  </p>
+                </div>
+              </>
+            )}
+
+            {healthEstimate && (
+              <>
+                <h4>3. Forest Health Assessment</h4>
+                <div style={{
+                  backgroundColor: healthEstimate.healthScore > 80 ? '#e8f8e8' :
+                    healthEstimate.healthScore > 60 ? '#fef9e7' :
+                    healthEstimate.healthScore > 40 ? '#fdedec' : '#f8d7da',
+                  padding: '15px', borderRadius: '6px', marginBottom: '20px'
+                }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px', fontSize: '13px' }}>
+                    <div>
+                      <strong>Health Score</strong>
+                      <div style={{ fontSize: '32px', fontWeight: 'bold', margin: '5px 0',
+                        color: healthEstimate.healthScore > 80 ? '#27ae60' :
+                          healthEstimate.healthScore > 60 ? '#f39c12' :
+                          healthEstimate.healthScore > 40 ? '#e67e22' : '#e74c3c'
+                      }}>
+                        {healthEstimate.healthScore}/100
+                        <span style={{ fontSize: '16px', marginLeft: '8px' }}>{healthEstimate.healthLabel}</span>
+                      </div>
+                      <div style={{ marginTop: '8px' }}>
+                        <strong>Current Status:</strong> {healthEstimate.currentStatus?.description || 'Unknown'}
+                        {healthEstimate.currentStatus?.severity !== 'none' && (
+                          <span style={{ marginLeft: '6px', padding: '2px 6px', borderRadius: '3px', fontSize: '11px',
+                            backgroundColor: healthEstimate.currentStatus?.severity === 'severe' ? '#e74c3c' : '#f39c12',
+                            color: '#fff'
+                          }}>
+                            {healthEstimate.currentStatus?.severity}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <strong>Probable Causes</strong>
+                      {healthEstimate.currentProbableCauses.length > 0 ? (
+                        <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                          {healthEstimate.currentProbableCauses.map((cause, i) => (
+                            <li key={i}>
+                              <span style={{ padding: '1px 5px', borderRadius: '3px', fontSize: '10px', marginRight: '5px',
+                                backgroundColor: cause.category === 'Disease' ? '#8e44ad' :
+                                  cause.category === 'Parasite' ? '#d35400' : '#2980b9',
+                                color: '#fff'
+                              }}>{cause.category}</span>
+                              {cause.name}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p style={{ margin: '5px 0', color: '#27ae60' }}>No specific threats identified</p>
+                      )}
+                    </div>
+                    <div>
+                      <strong>Detected Events</strong>
+                      <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                        {healthEstimate.anomalies.length > 0 ? (
+                          healthEstimate.anomalies.map((a, i) => (
+                            <li key={`a-${i}`} style={{ color: a.severity === 'severe' ? '#e74c3c' : '#f39c12' }}>
+                              {a.year}: Anomalous year (peak NDVI {a.peakNdvi.toFixed(3)} vs expected {a.expectedNdvi.toFixed(3)})
+                            </li>
+                          ))
+                        ) : (
+                          <li style={{ color: '#27ae60' }}>No anomalous years detected</li>
+                        )}
+                        {healthEstimate.disturbanceEvents.length > 0 && (
+                          healthEstimate.disturbanceEvents.slice(0, 3).map((e, i) => (
+                            <li key={`d-${i}`} style={{ color: '#e74c3c' }}>
+                              {e.date}: Sudden drop ({e.dropPercent}% NDVI decline)
+                            </li>
+                          ))
+                        )}
+                        {healthEstimate.gradualDecline && (
+                          <li style={{ color: '#e67e22' }}>
+                            Multi-year decline: {Math.abs(healthEstimate.gradualDecline.slopePerYear).toFixed(4)} NDVI/year
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
+                    Health assessment based on NDVI, NDMI (moisture), and NDRE (red edge) spectral indices from Sentinel-2.
+                    Probable causes are matched from species-specific vulnerability profiles — field verification is recommended for confirmation.
+                  </p>
                 </div>
               </>
             )}
