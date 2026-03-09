@@ -3,7 +3,8 @@ import { MapContainer, TileLayer, FeatureGroup, Polygon, useMap } from 'react-le
 import { Line, LineChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { estimateTreeCount } from './treeEstimation';
 import { analyzeForestHealth } from './healthEstimation';
-import { estimateBiomass, calculateRollingAverage, forestParams } from './dataProcessing';
+import { estimateBiomass, calculateRollingAverage } from './dataProcessing';
+import CarbonDashboard from './CarbonDashboard';
 import 'leaflet/dist/leaflet.css';
 
 // Fix Leaflet icon issue
@@ -117,6 +118,35 @@ const DrawControl = ({ onCreated, onDeleted }) => {
   return null;
 };
 
+const InfoButton = ({ id, showInfo, setShowInfo, children }) => (
+  <span style={{ position: 'relative', display: 'inline-block' }}>
+    <span
+      onClick={() => setShowInfo(prev => ({ ...prev, [id]: !prev[id] }))}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: '18px', height: '18px', borderRadius: '50%',
+        border: '1.5px solid #888', color: '#888', fontSize: '12px',
+        fontWeight: 'bold', fontStyle: 'italic', fontFamily: 'Georgia, serif',
+        cursor: 'pointer', userSelect: 'none'
+      }}
+      title="How is this calculated?"
+    >i</span>
+    {showInfo[id] && (
+      <div style={{
+        marginTop: '8px', fontSize: '11px', color: '#555', lineHeight: '1.6',
+        backgroundColor: '#f4f4f4', padding: '10px', borderRadius: '4px',
+        position: 'relative'
+      }}>
+        <span
+          onClick={() => setShowInfo(prev => ({ ...prev, [id]: false }))}
+          style={{ position: 'absolute', top: '4px', right: '8px', cursor: 'pointer', fontSize: '14px', color: '#999' }}
+        >&times;</span>
+        {children}
+      </div>
+    )}
+  </span>
+);
+
 const ForestBiomassApp = () => {
   const [selectedForests, setSelectedForests] = useState([]);
   const [forestType, setForestType] = useState('pine');
@@ -137,6 +167,7 @@ const ForestBiomassApp = () => {
   const [showDocumentation, setShowDocumentation] = useState(false);
   const [treeEstimate, setTreeEstimate] = useState(null);
   const [healthEstimate, setHealthEstimate] = useState(null);
+  const [showInfo, setShowInfo] = useState({});
 
 
 
@@ -302,112 +333,6 @@ function evaluatePixel(sample) {
       setProcessingStatus('');
       setError(`Test failed: ${err.message}`);
     }
-  };
-
-
-  // Simplified TIFF parser for FLOAT32 single-band data
-  const parseTIFF = (arrayBuffer) => {
-    const dataView = new DataView(arrayBuffer);
-
-    // Read TIFF header
-    const byteOrder = dataView.getUint16(0);
-    const littleEndian = byteOrder === 0x4949; // 'II' = little endian, 'MM' = big endian
-
-    // Verify magic number (42)
-    const magicNumber = dataView.getUint16(2, littleEndian);
-    if (magicNumber !== 42) {
-      throw new Error(`Invalid TIFF magic number: ${magicNumber}`);
-    }
-
-    // Get IFD offset
-    const ifdOffset = dataView.getUint32(4, littleEndian);
-
-    // Read IFD
-    const tagCount = dataView.getUint16(ifdOffset, littleEndian);
-
-    let imageWidth = 0;
-    let imageHeight = 0;
-    let stripOffsets = null;
-    let stripByteCounts = null;
-    let bitsPerSample = 32;
-    let sampleFormat = 3; // IEEE floating point
-
-    // Parse IFD entries (12 bytes each)
-    for (let i = 0; i < tagCount; i++) {
-      const entryOffset = ifdOffset + 2 + (i * 12);
-      const tag = dataView.getUint16(entryOffset, littleEndian);
-      const type = dataView.getUint16(entryOffset + 2, littleEndian);
-      const count = dataView.getUint32(entryOffset + 4, littleEndian);
-      const valueOffset = entryOffset + 8;
-
-      switch (tag) {
-        case 256: // ImageWidth
-          imageWidth = type === 3 ? dataView.getUint16(valueOffset, littleEndian) : dataView.getUint32(valueOffset, littleEndian);
-          break;
-        case 257: // ImageLength (height)
-          imageHeight = type === 3 ? dataView.getUint16(valueOffset, littleEndian) : dataView.getUint32(valueOffset, littleEndian);
-          break;
-        case 258: // BitsPerSample
-          bitsPerSample = dataView.getUint16(valueOffset, littleEndian);
-          break;
-        case 273: // StripOffsets
-          if (count === 1) {
-            stripOffsets = dataView.getUint32(valueOffset, littleEndian);
-          } else {
-            // Multiple strips - read offset to strip offsets array
-            const offsetsPtr = dataView.getUint32(valueOffset, littleEndian);
-            stripOffsets = [];
-            for (let j = 0; j < count; j++) {
-              stripOffsets.push(dataView.getUint32(offsetsPtr + j * 4, littleEndian));
-            }
-          }
-          break;
-        case 279: // StripByteCounts
-          if (count === 1) {
-            stripByteCounts = dataView.getUint32(valueOffset, littleEndian);
-          } else {
-            // Multiple strips
-            const countsPtr = dataView.getUint32(valueOffset, littleEndian);
-            stripByteCounts = [];
-            for (let j = 0; j < count; j++) {
-              stripByteCounts.push(dataView.getUint32(countsPtr + j * 4, littleEndian));
-            }
-          }
-          break;
-        case 339: // SampleFormat
-          sampleFormat = dataView.getUint16(valueOffset, littleEndian);
-          break;
-      }
-    }
-
-    // Read pixel data
-    const pixelCount = imageWidth * imageHeight;
-    const pixels = new Float32Array(pixelCount);
-
-    if (Array.isArray(stripOffsets)) {
-      // Multiple strips
-      let pixelIndex = 0;
-      for (let i = 0; i < stripOffsets.length; i++) {
-        const stripOffset = stripOffsets[i];
-        const stripSize = stripByteCounts[i];
-        const floatsInStrip = stripSize / 4;
-
-        for (let j = 0; j < floatsInStrip && pixelIndex < pixelCount; j++) {
-          pixels[pixelIndex++] = dataView.getFloat32(stripOffset + j * 4, littleEndian);
-        }
-      }
-    } else {
-      // Single strip
-      for (let i = 0; i < pixelCount; i++) {
-        pixels[i] = dataView.getFloat32(stripOffsets + i * 4, littleEndian);
-      }
-    }
-
-    return {
-      width: imageWidth,
-      height: imageHeight,
-      data: pixels
-    };
   };
 
   // Fetch NDVI data using Process API - FIXED VERSION with GeoTIFF.js
@@ -686,7 +611,6 @@ function evaluatePixel(sample) {
       const selectedForest = selectedForests[selectedForestIndex];
       const currentDate = new Date();
       const currentYear = currentDate.getFullYear();
-      const currentMonth = currentDate.getMonth() + 1;
       const results = [];
       let latestNdviValues = null;
       const startYear = currentYear - 10;
@@ -929,7 +853,7 @@ function evaluatePixel(sample) {
       'NDRE 7-Day Rolling Avg',
       'Health Score',
       'Stress Type',
-      'Stress Severity'
+      'Stress Severity',
     ];
 
     const csvRows = biomassData.map(row => [
@@ -1182,7 +1106,7 @@ function evaluatePixel(sample) {
           <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
             <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>1. Authentication Setup</h4>
             <ul style={{ marginLeft: '20px' }}>
-              <li><strong>Option A - Direct OAuth2:</strong> Register at <a href="https://dataspace.copernicus.eu/" target="_blank">Copernicus Data Space</a> → Create OAuth2 client → Enter Client ID & Secret → Click "Authenticate"</li>
+              <li><strong>Option A - Direct OAuth2:</strong> Register at <a href="https://dataspace.copernicus.eu/" target="_blank" rel="noreferrer">Copernicus Data Space</a> → Create OAuth2 client → Enter Client ID & Secret → Click "Authenticate"</li>
               <li><strong>Option B - Manual Token:</strong> If CORS blocks direct auth, enable "Use manual token mode" → Get token via POST request to:
                 <code style={{ display: 'block', margin: '5px 0', padding: '5px', backgroundColor: '#f5f5f5', fontSize: '12px' }}>
                   https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token
@@ -1765,7 +1689,9 @@ const ndviArray = rasters[0];  // Float32Array`}
       {biomassData.length > 0 && (
         <div style={styles.chartContainer}>
           <div style={styles.buttonContainer}>
-            <h2 style={{ margin: 0 }}>Satellite Data: NDVI & Biomass Trends</h2>
+            <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>Satellite Data: NDVI & Biomass Trends <InfoButton id="mainChart" showInfo={showInfo} setShowInfo={setShowInfo}>
+                NDVI (Normalized Difference Vegetation Index) measures greenness from satellite red and near-infrared bands: (NIR − Red) / (NIR + Red), range 0–1. NDMI (Normalized Difference Moisture Index) measures canopy water content from NIR and SWIR bands. NDRE (Normalized Difference Red Edge) detects chlorophyll density from red-edge and NIR bands. Biomass is estimated from NDVI using a species-specific logistic growth model: biomass = youngBiomass + (maxBiomass − youngBiomass) × (1 − e<sup>−growthRate × age</sup>) × (NDVI / saturationNDVI). Rolling averages use a 7-observation window to smooth noise.
+              </InfoButton></h2>
             <button
               style={styles.exportButton}
               onClick={exportToCSV}
@@ -1900,7 +1826,9 @@ const ndviArray = rasters[0];  // Float32Array`}
                       </ul>
                     </div>
                     <div>
-                      <strong>NDVI Statistics</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>NDVI Statistics</strong> <InfoButton id="ndviStats" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        Mean, min, max, and standard deviation of all NDVI values across satellite acquisitions. Vegetation coverage = percentage of acquisitions where the area was classified as forested (NDVI indicates active vegetation).
+                      </InfoButton></div>
                       <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
                         <li>Mean NDVI: {(biomassData.reduce((sum, d) => sum + d.ndvi, 0) / biomassData.length).toFixed(4)}</li>
                         <li>NDVI Range: {Math.min(...biomassData.map(d => d.ndvi)).toFixed(4)} to {Math.max(...biomassData.map(d => d.ndvi)).toFixed(4)}</li>
@@ -1909,7 +1837,9 @@ const ndviArray = rasters[0];  // Float32Array`}
                       </ul>
                     </div>
                     <div>
-                      <strong>Biomass Estimates</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>Biomass Estimates</strong> <InfoButton id="biomassEstimates" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        Biomass (tons/ha) is estimated from each NDVI reading using a logistic growth curve calibrated per species. Parameters: pine max 450 t/ha at growth rate 0.08, fir 500 t/ha at 0.07, birch 300 t/ha at 0.12, aspen 250 t/ha at 0.15. Current and initial values are the last and first observations. Annual growth rate = (current − initial) / years elapsed.
+                      </InfoButton></div>
                       <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
                         <li>Current Biomass: {biomassData[biomassData.length - 1].biomass.toFixed(2)} tons/ha</li>
                         <li>Initial Biomass: {biomassData[0].biomass.toFixed(2)} tons/ha</li>
@@ -1918,7 +1848,9 @@ const ndviArray = rasters[0];  // Float32Array`}
                       </ul>
                     </div>
                     <div>
-                      <strong>Data Quality Metrics</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>Data Quality Metrics</strong> <InfoButton id="dataQuality" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        Pixel coverage = percentage of the polygon area with valid (cloud-free) satellite data per acquisition. Valid pixels = number of 10m×10m Sentinel-2 pixels with usable data. Cloud-free acquisitions = readings with {'>'}80% pixel coverage.
+                      </InfoButton></div>
                       <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
                         <li>Mean Pixel Coverage: {(biomassData.reduce((sum, d) => sum + parseFloat(d.coverage), 0) / biomassData.length).toFixed(1)}%</li>
                         <li>Valid Pixels/Acquisition: {Math.round(biomassData.reduce((sum, d) => sum + d.validPixels, 0) / biomassData.length)}</li>
@@ -1937,7 +1869,9 @@ const ndviArray = rasters[0];  // Float32Array`}
                 <div style={{ backgroundColor: '#e8f8e8', padding: '15px', borderRadius: '6px', marginBottom: '20px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px', fontSize: '13px' }}>
                     <div>
-                      <strong>Tree Density Estimate</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>Tree Density Estimate</strong> <InfoButton id="treeDensity" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        Tree count is estimated from satellite NDVI pixel data via canopy analysis. Pixels with NDVI {'>'} 0.4 = full canopy, 0.2–0.4 = partial (linear interpolation), {'<'} 0.2 = no canopy. The canopy fraction is divided by individual crown area (π × (diameter/2)²) adjusted by a species packing factor (0.60–0.75). Crown diameter grows with age: diameter = minDiam + (maxDiam − minDiam) × (1 − e<sup>−0.04 × age</sup>). Range is ±30% to reflect 10m pixel resolution limits.
+                      </InfoButton></div>
                       <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
                         <li>Estimated Trees: <strong>{treeEstimate.count.toLocaleString()}</strong></li>
                         <li>Confidence Range: {treeEstimate.countMin.toLocaleString()} – {treeEstimate.countMax.toLocaleString()}</li>
@@ -1946,7 +1880,9 @@ const ndviArray = rasters[0];  // Float32Array`}
                       </ul>
                     </div>
                     <div>
-                      <strong>Canopy Parameters</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>Canopy Parameters</strong> <InfoButton id="canopyParams" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        Canopy cover = fraction of area under tree crowns derived from NDVI pixel thresholds. Crown diameter is modeled per species (pine 2–8m, fir 1.5–6m, birch 3–10m, aspen 2.5–9m) using a saturating exponential of forest age. Packing factor accounts for gaps between crowns (not all canopy area contains trees).
+                      </InfoButton></div>
                       <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
                         <li>Canopy Cover: {treeEstimate.canopyCover}%</li>
                         <li>Mean Crown Diameter: {treeEstimate.meanCrownDiameter} m</li>
@@ -1963,9 +1899,23 @@ const ndviArray = rasters[0];  // Float32Array`}
               </>
             )}
 
+            {biomassData.length > 0 && (
+              <>
+                <h4>3. Timber Value & Harvest Analysis</h4>
+                <CarbonDashboard
+                  biomassData={biomassData}
+                  forestType={selectedForests[selectedForestIndex].type}
+                  forestAge={forestAge}
+                  areaHectares={parseFloat(selectedForests[selectedForestIndex].area)}
+                  showInfo={showInfo}
+                  setShowInfo={setShowInfo}
+                />
+              </>
+            )}
+
             {healthEstimate && (
               <>
-                <h4>3. Forest Health Assessment</h4>
+                <h4>4. Forest Health Assessment</h4>
                 <div style={{
                   backgroundColor: healthEstimate.healthScore > 80 ? '#e8f8e8' :
                     healthEstimate.healthScore > 60 ? '#fef9e7' :
@@ -1974,7 +1924,25 @@ const ndviArray = rasters[0];  // Float32Array`}
                 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px', fontSize: '13px' }}>
                     <div>
-                      <strong>Health Score</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <strong>Health Score</strong>
+                        <InfoButton id="healthScore" showInfo={showInfo} setShowInfo={setShowInfo}>
+                          <strong>How this score is calculated:</strong>
+                          <br />Score starts at 100 and points are deducted for three types of problems detected in the satellite data:
+                          <ol style={{ margin: '4px 0', paddingLeft: '18px' }}>
+                            <li>
+                              <strong>Recent stress (-8 pts each, max 40):</strong> Each satellite reading is classified as stressed or healthy by comparing its NDVI, NDMI, and NDRE values against baselines (median of the top 25% of all readings). If any index is {'>'} 10% below its baseline, that reading is stressed. The last 5 readings are checked.
+                            </li>
+                            <li>
+                              <strong>Anomalous years (-10 pts each):</strong> For each calendar year, the highest NDVI value (peak greenness) is found. If a year's peak is more than 1.5 standard deviations below the multi-year average of all yearly peaks, that year is flagged as anomalous.
+                            </li>
+                            <li>
+                              <strong>Gradual decline (up to -30 pts):</strong> A linear regression is fitted to the yearly peak NDVI values over time. If the slope is steeper than -0.01 NDVI/year (i.e., peak greenness is declining year over year), points are deducted: min(30, |slope| &times; 1000).
+                            </li>
+                          </ol>
+                          Score {'>'} 80 = Good, {'>'} 60 = Fair, {'>'} 40 = Poor, {'<='} 40 = Critical.
+                        </InfoButton>
+                      </div>
                       <div style={{ fontSize: '32px', fontWeight: 'bold', margin: '5px 0',
                         color: healthEstimate.healthScore > 80 ? '#27ae60' :
                           healthEstimate.healthScore > 60 ? '#f39c12' :
