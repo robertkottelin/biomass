@@ -7,6 +7,8 @@ import {
   projectForestValue,
   findOptimalHarvest,
   projectHarvestCycle,
+  estimateCarbonCreditValue,
+  EU_ETS_PRICE_PER_TON,
   CARBON_FRACTION,
   CO2_PER_CARBON,
   BELOW_GROUND_RATIO,
@@ -213,6 +215,35 @@ describe('compareScenarios', () => {
     expect(result.continueGrowing.cumulativeSequestration).toBeGreaterThanOrEqual(0);
     expect(result.harvestReplant.cumulativeSequestration).toBeGreaterThanOrEqual(0);
     expect(result.optimal.cumulativeSequestration).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('estimateCarbonCreditValue', () => {
+  test('zero CO2e returns zero value', () => {
+    const result = estimateCarbonCreditValue(0);
+    expect(result.totalValue).toBe(0);
+  });
+
+  test('default price is EU_ETS_PRICE_PER_TON', () => {
+    const result = estimateCarbonCreditValue(100);
+    expect(result.pricePerTon).toBe(EU_ETS_PRICE_PER_TON);
+    expect(result.totalValue).toBe(100 * EU_ETS_PRICE_PER_TON);
+  });
+
+  test('custom price override', () => {
+    const result = estimateCarbonCreditValue(100, 50);
+    expect(result.pricePerTon).toBe(50);
+    expect(result.totalValue).toBe(5000);
+  });
+
+  test('currency is EUR', () => {
+    const result = estimateCarbonCreditValue(10);
+    expect(result.currency).toBe('EUR');
+  });
+
+  test('co2eTons passthrough', () => {
+    const result = estimateCarbonCreditValue(42.5);
+    expect(result.co2eTons).toBe(42.5);
   });
 });
 

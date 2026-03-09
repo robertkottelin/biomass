@@ -4,7 +4,12 @@ import {
   estimateTimberValue,
   projectForestValue,
   findOptimalHarvest,
-  projectHarvestCycle
+  projectHarvestCycle,
+  biomassToCarbon,
+  projectCarbonStock,
+  compareScenarios,
+  estimateCarbonCreditValue,
+  EU_ETS_PRICE_PER_TON
 } from './carbonCalculation';
 
 const InfoButton = ({ id, showInfo, setShowInfo, children }) => (
@@ -61,6 +66,41 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
       standingValueCycle: cycle.points[i] ? Math.round(cycle.points[i].standingTimberValue) : 0
     }));
   }, [forestValueData]);
+
+  const carbonStock = useMemo(() => {
+    if (!biomassData || biomassData.length === 0) return null;
+    const latestBiomass = biomassData[biomassData.length - 1].biomass;
+    return biomassToCarbon(latestBiomass, forestType);
+  }, [biomassData, forestType]);
+
+  const carbonProjection = useMemo(() => {
+    if (!biomassData || biomassData.length === 0) return null;
+    const latestBiomass = biomassData[biomassData.length - 1].biomass;
+    const points = projectCarbonStock(latestBiomass, forestType, forestAge, areaHectares, 30);
+    const annualSeqRate = points.length > 1 ? points[1].annualSequestration : 0;
+    return { points, annualSeqRate };
+  }, [biomassData, forestType, forestAge, areaHectares]);
+
+  const creditValue = useMemo(() => {
+    if (!carbonStock) return null;
+    return estimateCarbonCreditValue(carbonStock.co2eTons * areaHectares);
+  }, [carbonStock, areaHectares]);
+
+  const scenarioData = useMemo(() => {
+    if (!biomassData || biomassData.length === 0) return null;
+    const latestBiomass = biomassData[biomassData.length - 1].biomass;
+    return compareScenarios(latestBiomass, forestType, forestAge, areaHectares);
+  }, [biomassData, forestType, forestAge, areaHectares]);
+
+  const scenarioChartData = useMemo(() => {
+    if (!scenarioData) return [];
+    return scenarioData.continueGrowing.data.map((d, i) => ({
+      year: d.year,
+      continueGrowing: parseFloat(d.co2ePerHa.toFixed(1)),
+      harvestReplant: parseFloat(scenarioData.harvestReplant.data[i].co2ePerHa.toFixed(1)),
+      optimal: parseFloat(scenarioData.optimal.data[i].co2ePerHa.toFixed(1))
+    }));
+  }, [scenarioData]);
 
   if (!timberValue || !biomassData || biomassData.length === 0) {
     return null;
@@ -168,8 +208,78 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
         </div>
       )}
 
+      {/* Carbon Stock Cards */}
+      {carbonStock && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '20px', marginTop: '20px' }}>
+          <div style={cardStyle}>
+            <div style={{ ...cardLabelStyle, color: '#27ae60', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>Carbon Stock <InfoButton id="carbonStock" showInfo={showInfo} setShowInfo={setShowInfo}>
+              Total CO2 equivalent stored per hectare, calculated using IPCC Tier 1 methodology. Above-ground = biomass × 0.5 (carbon fraction) × 3.67 (CO2/C ratio). Below-ground = above-ground × root:shoot ratio (pine/fir 0.29, birch/aspen 0.24). Soil carbon from Finnish averages (Luke): pine 70, fir 85, birch 55, aspen 50 t C/ha.
+            </InfoButton></div>
+            <div style={{ ...cardValueStyle, color: '#27ae60' }}>
+              {carbonStock.co2eTons.toFixed(1)} t CO2e/ha
+            </div>
+            <div style={cardSubStyle}>Above: {carbonStock.breakdown.aboveGround.toFixed(0)} / Below: {carbonStock.breakdown.belowGround.toFixed(0)} / Soil: {carbonStock.breakdown.soil.toFixed(0)}</div>
+          </div>
+          <div style={cardStyle}>
+            <div style={{ ...cardLabelStyle, color: '#27ae60', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>Annual Sequestration <InfoButton id="annualSeq" showInfo={showInfo} setShowInfo={setShowInfo}>
+              Net CO2 absorbed per hectare per year, derived from the projected carbon stock curve. This is the difference in total CO2e stock between consecutive years. Young, fast-growing forests sequester more; old forests near maximum biomass sequester less.
+            </InfoButton></div>
+            <div style={{ ...cardValueStyle, color: '#27ae60' }}>
+              {carbonProjection ? carbonProjection.annualSeqRate.toFixed(1) : '—'} t CO2e/ha/yr
+            </div>
+            <div style={cardSubStyle}>Total: {carbonProjection ? (carbonProjection.annualSeqRate * areaHectares).toFixed(1) : '—'} t CO2e/yr</div>
+          </div>
+          <div style={cardStyle}>
+            <div style={{ ...cardLabelStyle, color: '#27ae60', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>Carbon Credit Value <InfoButton id="carbonCredit" showInfo={showInfo} setShowInfo={setShowInfo}>
+              Estimated market value of the total CO2e stored across the entire forest area. Calculated as total CO2e tons × EU ETS price (€{EU_ETS_PRICE_PER_TON}/t, 2024 average). This is a theoretical value — actual carbon credit monetization requires certification (e.g., Verra VCS, Gold Standard) and additionality proof.
+            </InfoButton></div>
+            <div style={{ ...cardValueStyle, color: '#27ae60' }}>
+              {creditValue ? `€${creditValue.totalValue.toFixed(0)}` : '—'}
+            </div>
+            <div style={cardSubStyle}>at €{EU_ETS_PRICE_PER_TON}/t CO2 (EU ETS)</div>
+            <div style={cardSubStyle}>€{carbonStock ? (carbonStock.co2eTons * EU_ETS_PRICE_PER_TON).toFixed(0) : '0'}/ha</div>
+          </div>
+        </div>
+      )}
+
+      {/* Carbon Sequestration Scenarios Chart */}
+      {scenarioData && scenarioChartData.length > 0 && (
+        <div style={{ marginBottom: '20px' }}>
+          <h5 style={{ margin: '0 0 5px 0', color: '#333', display: 'flex', alignItems: 'center', gap: '6px' }}>Carbon Sequestration Scenarios (t CO2e/ha) <InfoButton id="carbonScenarios" showInfo={showInfo} setShowInfo={setShowInfo}>
+            Three 30-year management scenarios compared by carbon stock per hectare. "Continue Growing" = no harvest, forest grows towards maximum biomass. "Harvest + Replant" = clearcut now, replant at age 0. "Optimal" = harvest when annual sequestration drops below 0.5 t CO2e/ha/yr, then replant. Carbon stock includes above-ground, below-ground, and soil pools.
+          </InfoButton></h5>
+          <p style={{ fontSize: '11px', color: '#666', margin: '0 0 10px 0' }}>
+            30-year carbon stock projection under different management strategies.
+            Continue: <strong>{scenarioData.continueGrowing.cumulativeSequestration.toFixed(1)} t CO2e</strong> cumulative |
+            Harvest+Replant: <strong>{scenarioData.harvestReplant.cumulativeSequestration.toFixed(1)} t CO2e</strong> |
+            Optimal: <strong>{scenarioData.optimal.cumulativeSequestration.toFixed(1)} t CO2e</strong>
+          </p>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={scenarioChartData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis
+                dataKey="year"
+                label={{ value: 'Years from now', position: 'insideBottom', offset: -5, fontSize: 11 }}
+                tick={{ fontSize: 11 }}
+              />
+              <YAxis
+                tick={{ fontSize: 11 }}
+                tickFormatter={(v) => `${v.toFixed(0)}`}
+                label={{ value: 't CO2e/ha', angle: -90, position: 'insideLeft', fontSize: 11 }}
+              />
+              <Tooltip formatter={(val) => [`${Number(val).toFixed(1)} t CO2e/ha`]} />
+              <Legend wrapperStyle={{ fontSize: '12px' }} />
+              <Line type="monotone" dataKey="continueGrowing" stroke="#27ae60" strokeWidth={2} dot={false} name="Continue Growing" />
+              <Line type="monotone" dataKey="harvestReplant" stroke="#e74c3c" strokeWidth={2} dot={false} name="Harvest + Replant" />
+              <Line type="monotone" dataKey="optimal" stroke="#3498db" strokeWidth={2} dot={false} name="Optimal" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
       <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
         Timber prices are Finnish averages (Luke 2024). Values are estimates for scenario comparison — not for timber sales.
+        Carbon credit values use EU ETS 2024 average price — actual credit pricing depends on certification scheme and market conditions.
       </p>
     </div>
   );

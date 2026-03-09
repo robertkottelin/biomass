@@ -1,5 +1,8 @@
 import { forestParams, estimateBiomass } from './dataProcessing';
 
+// EU ETS average price 2024 (€/ton CO2)
+export const EU_ETS_PRICE_PER_TON = 65;
+
 // IPCC Tier 1 constants
 export const CARBON_FRACTION = 0.5;
 export const CO2_PER_CARBON = 3.67; // 44/12
@@ -269,6 +272,16 @@ export function projectHarvestCycle(forestType, areaHectares, totalYears = 100) 
   }
 
   return { points, cycleLength, optimalAge: optimal.optimalAge, valueAtHarvest: optimal.valueAtHarvest };
+}
+
+export function estimateCarbonCreditValue(co2eTons, creditPricePerTon) {
+  const pricePerTon = creditPricePerTon != null ? creditPricePerTon : EU_ETS_PRICE_PER_TON;
+  return {
+    totalValue: co2eTons * pricePerTon,
+    co2eTons,
+    pricePerTon,
+    currency: 'EUR'
+  };
 }
 
 export function estimateTimberValue(biomassPerHa, forestType, forestAge, areaHectares) {

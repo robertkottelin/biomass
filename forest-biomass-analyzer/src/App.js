@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, FeatureGroup, Polygon, useMap } from 'react-leaflet';
-import { Line, LineChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { Line, LineChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { estimateTreeCount } from './treeEstimation';
 import { analyzeForestHealth } from './healthEstimation';
 import { estimateBiomass, calculateRollingAverage } from './dataProcessing';
 import CarbonDashboard from './CarbonDashboard';
+import { estimateBiodiversity } from './biodiversityEstimation';
 import 'leaflet/dist/leaflet.css';
 
 // Fix Leaflet icon issue
@@ -167,6 +168,7 @@ const ForestBiomassApp = () => {
   const [showDocumentation, setShowDocumentation] = useState(false);
   const [treeEstimate, setTreeEstimate] = useState(null);
   const [healthEstimate, setHealthEstimate] = useState(null);
+  const [biodiversityEstimate, setBiodiversityEstimate] = useState(null);
   const [showInfo, setShowInfo] = useState({});
 
 
@@ -747,6 +749,18 @@ function evaluatePixel(sample) {
       // Forest health analysis
       const healthResult = analyzeForestHealth(finalResults, selectedForest.type, forestAge);
       setHealthEstimate(healthResult);
+
+      // Biodiversity assessment
+      const latestResult = finalResults[finalResults.length - 1];
+      const bioEst = estimateBiodiversity(
+        finalResults,
+        treeEstimate || (latestNdviValues ? { canopyCover: '70', meanCrownDiameter: '3.0' } : null),
+        healthResult,
+        selectedForest.type,
+        forestAge,
+        parseFloat(selectedForest.area)
+      );
+      setBiodiversityEstimate(bioEst);
 
       setProcessingStatus('');
 
@@ -2009,9 +2023,197 @@ const ndviArray = rasters[0];  // Float32Array`}
                       </ul>
                     </div>
                   </div>
+                  {/* Health Timeline Chart */}
+                  {healthEstimate.perAcquisitionStress && healthEstimate.perAcquisitionStress.length > 0 && (() => {
+                    const healthTimelineData = healthEstimate.perAcquisitionStress.map(d => {
+                      const matchingData = biomassData.find(b => b.date === d.date);
+                      const ndvi = matchingData ? matchingData.ndvi : null;
+                      const ndviDeviation = ndvi != null && healthEstimate.baselines.ndvi > 0
+                        ? ((ndvi - healthEstimate.baselines.ndvi) / healthEstimate.baselines.ndvi * 100)
+                        : 0;
+                      const isStressed = d.stress.type !== 'healthy';
+                      // Per-acquisition health indicator: 100 when at baseline, drops proportionally
+                      const healthIndex = Math.max(0, Math.min(100, Math.round(100 + ndviDeviation * 3)));
+                      return {
+                        date: d.date,
+                        healthIndex,
+                        ndvi: ndvi != null ? parseFloat(ndvi.toFixed(4)) : null,
+                        stressType: d.stress.type,
+                        severity: d.stress.severity,
+                        description: d.stress.description,
+                        isStressed,
+                        forestAge: matchingData ? parseFloat(matchingData.forestAge.toFixed(1)) : null
+                      };
+                    });
+
+                    const anomalyDates = new Set(healthEstimate.anomalies.map(a => a.date));
+                    const disturbanceDates = new Set(healthEstimate.disturbanceEvents.map(e => e.date));
+
+                    return (
+                      <div style={{ marginTop: '15px' }}>
+                        <h5 style={{ margin: '0 0 5px 0', color: '#333', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          Health Index Timeline
+                          <InfoButton id="healthTimeline" showInfo={showInfo} setShowInfo={setShowInfo}>
+                            Per-acquisition health index derived from NDVI deviation against the baseline (top-quartile mean). 100 = at or above baseline, lower values indicate stress. Red vertical lines mark sudden disturbance events ({'>'}15% NDVI drop). Orange vertical lines mark anomalous year peaks. Stress classifications shown in tooltip: moisture stress, defoliation, chlorophyll loss, etc.
+                          </InfoButton>
+                        </h5>
+                        <p style={{ fontSize: '11px', color: '#666', margin: '0 0 10px 0' }}>
+                          Each point is a satellite acquisition. Drops below the green zone indicate stress events — hover for details.
+                        </p>
+                        <ResponsiveContainer width="100%" height={250}>
+                          <LineChart data={healthTimelineData}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis
+                              dataKey="date"
+                              tick={{ fontSize: 10 }}
+                              angle={-45}
+                              textAnchor="end"
+                              height={60}
+                            />
+                            <YAxis
+                              domain={[0, 100]}
+                              tick={{ fontSize: 11 }}
+                              label={{ value: 'Health Index', angle: -90, position: 'insideLeft', fontSize: 11 }}
+                            />
+                            <Tooltip
+                              content={({ active, payload }) => {
+                                if (!active || !payload || !payload.length) return null;
+                                const d = payload[0].payload;
+                                return (
+                                  <div style={{ backgroundColor: '#fff', border: '1px solid #ccc', padding: '8px', borderRadius: '4px', fontSize: '12px' }}>
+                                    <div><strong>{d.date}</strong> (age: {d.forestAge}yr)</div>
+                                    <div>Health Index: <strong style={{ color: d.healthIndex > 70 ? '#27ae60' : d.healthIndex > 40 ? '#f39c12' : '#e74c3c' }}>{d.healthIndex}</strong></div>
+                                    <div>NDVI: {d.ndvi}</div>
+                                    <div>Status: {d.description}</div>
+                                    {d.isStressed && <div style={{ color: '#e74c3c' }}>Stress: {d.stressType} ({d.severity})</div>}
+                                  </div>
+                                );
+                              }}
+                            />
+                            {/* Green zone: healthy range */}
+                            <ReferenceLine y={70} stroke="#27ae60" strokeDasharray="4 4" strokeWidth={1} />
+                            <ReferenceLine y={40} stroke="#e74c3c" strokeDasharray="4 4" strokeWidth={1} />
+                            {/* Mark disturbance events */}
+                            {healthTimelineData.map((d, i) =>
+                              disturbanceDates.has(d.date) ? (
+                                <ReferenceLine key={`dist-${i}`} x={d.date} stroke="#e74c3c" strokeWidth={2} strokeDasharray="2 2" />
+                              ) : null
+                            )}
+                            {/* Mark anomalous year peaks */}
+                            {healthTimelineData.map((d, i) =>
+                              anomalyDates.has(d.date) ? (
+                                <ReferenceLine key={`anom-${i}`} x={d.date} stroke="#f39c12" strokeWidth={2} strokeDasharray="3 3" />
+                              ) : null
+                            )}
+                            <Line
+                              type="monotone"
+                              dataKey="healthIndex"
+                              stroke="#2c3e50"
+                              strokeWidth={2}
+                              dot={(props) => {
+                                const { cx, cy, payload } = props;
+                                const color = payload.isStressed
+                                  ? (payload.severity === 'severe' ? '#e74c3c' : '#f39c12')
+                                  : '#27ae60';
+                                return <circle key={`dot-${props.index}`} cx={cx} cy={cy} r={payload.isStressed ? 4 : 2} fill={color} stroke={color} />;
+                              }}
+                              activeDot={{ r: 5 }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                        <div style={{ display: 'flex', gap: '15px', fontSize: '10px', color: '#666', marginTop: '5px', flexWrap: 'wrap' }}>
+                          <span><span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#27ae60', marginRight: '4px' }}></span>Healthy</span>
+                          <span><span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#f39c12', marginRight: '4px' }}></span>Moderate stress</span>
+                          <span><span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#e74c3c', marginRight: '4px' }}></span>Severe stress</span>
+                          <span><span style={{ display: 'inline-block', width: '20px', height: '2px', backgroundColor: '#e74c3c', marginRight: '4px', verticalAlign: 'middle' }}></span>Disturbance event</span>
+                          <span><span style={{ display: 'inline-block', width: '20px', height: '2px', backgroundColor: '#f39c12', marginRight: '4px', verticalAlign: 'middle' }}></span>Anomalous year</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
                     Health assessment based on NDVI, NDMI (moisture), and NDRE (red edge) spectral indices from Sentinel-2.
                     Probable causes are matched from species-specific vulnerability profiles — field verification is recommended for confirmation.
+                  </p>
+                </div>
+              </>
+            )}
+
+            {biodiversityEstimate && (
+              <>
+                <h4>5. Biodiversity Assessment</h4>
+                <div style={{
+                  backgroundColor: biodiversityEstimate.overallScore > 70 ? '#e8f8e8' :
+                    biodiversityEstimate.overallScore > 50 ? '#fef9e7' : '#fdedec',
+                  padding: '15px', borderRadius: '6px', marginBottom: '20px'
+                }}>
+                  <div style={{ textAlign: 'center', marginBottom: '15px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase', color: '#555' }}>Biodiversity Score</span>
+                      <InfoButton id="bioScore" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        <strong>Weighted composite score (0-100):</strong>
+                        <ul style={{ margin: '4px 0', paddingLeft: '18px' }}>
+                          <li><strong>Structural Diversity (40%):</strong> NDVI spatial variance (canopy heterogeneity), canopy cover optimality (60-85% ideal per Finnish forestry science), and crown diameter maturity relative to species maximum.</li>
+                          <li><strong>Species Composition (30%):</strong> Fixed at 30/100 for monoculture stands — remote sensing cannot reliably detect species mix from a single polygon type. Honest limitation.</li>
+                          <li><strong>Age/Maturity (15%):</strong> min(age / mature age, 1). Older forests provide more habitat niches (Kuuluvainen & Aakala, 2011).</li>
+                          <li><strong>Health Factor (15%):</strong> From spectral health assessment. Healthy forests support more biodiversity.</li>
+                        </ul>
+                        Score {'>'} 70 = Good, {'>'} 50 = Moderate, {'<='} 50 = Low.
+                      </InfoButton>
+                    </div>
+                    <div style={{
+                      fontSize: '48px', fontWeight: 'bold', margin: '5px 0',
+                      color: biodiversityEstimate.overallScore > 70 ? '#27ae60' :
+                        biodiversityEstimate.overallScore > 50 ? '#f39c12' : '#e74c3c'
+                    }}>
+                      {biodiversityEstimate.overallScore}/100
+                    </div>
+                    <div style={{ fontSize: '16px', color: '#555' }}>{biodiversityEstimate.overallLabel}</div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '15px' }}>
+                    <div style={{ backgroundColor: 'rgba(255,255,255,0.6)', padding: '10px', borderRadius: '6px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>Structural Diversity <InfoButton id="bioStructural" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        Measures canopy heterogeneity from NDVI variance across the polygon (40% weight), canopy cover optimality — 60-85% is ideal as it provides both shelter and light gaps (30%), and crown diameter maturity (30%). Higher variation = more microhabitats.
+                      </InfoButton></div>
+                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2c3e50' }}>{biodiversityEstimate.structuralDiversity}</div>
+                    </div>
+                    <div style={{ backgroundColor: 'rgba(255,255,255,0.6)', padding: '10px', borderRadius: '6px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>Species Composition <InfoButton id="bioSpecies" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        Fixed at 30/100 for monoculture stands. We cannot detect mixed species from a single forest type polygon. Finnish forests with 3+ tree species score significantly higher in biodiversity surveys (Vanha-Majamaa & Jalonen, 2001). Add broadleaves to conifer stands for improvement.
+                      </InfoButton></div>
+                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2c3e50' }}>{biodiversityEstimate.speciesComposition}</div>
+                    </div>
+                    <div style={{ backgroundColor: 'rgba(255,255,255,0.6)', padding: '10px', borderRadius: '6px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>Age/Maturity <InfoButton id="bioAge" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        Ratio of current age to species mature age (pine 80yr, fir 90yr, birch 60yr, aspen 50yr). Older forests develop more structural complexity, deadwood, and ecological niches for epiphytes, cavity-nesting birds, and saproxylic insects.
+                      </InfoButton></div>
+                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2c3e50' }}>{biodiversityEstimate.ageFactor}</div>
+                    </div>
+                    <div style={{ backgroundColor: 'rgba(255,255,255,0.6)', padding: '10px', borderRadius: '6px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>Deadwood Potential <InfoButton id="bioDeadwood" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        Deadwood is critical for ~25% of forest species in Finland. Estimated from forest age (older forests have more natural mortality) and NDVI spatial variance (indicates structural heterogeneity). "Likely" if age {'>'} species deadwood age and high NDVI variance. Deadwood ages: pine 100yr, fir 110yr, birch 70yr, aspen 60yr.
+                      </InfoButton></div>
+                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2c3e50' }}>{biodiversityEstimate.deadwood}</div>
+                    </div>
+                  </div>
+
+                  {biodiversityEstimate.recommendations.length > 0 && (
+                    <div style={{ marginTop: '10px' }}>
+                      <strong style={{ fontSize: '12px' }}>Recommendations:</strong>
+                      <ul style={{ margin: '5px 0 0 0', paddingLeft: '20px', fontSize: '12px', color: '#555' }}>
+                        {biodiversityEstimate.recommendations.map((rec, i) => (
+                          <li key={i} style={{ marginBottom: '3px' }}>{rec}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
+                    Biodiversity assessment is based on remote sensing indicators and forestry models — not a field survey.
+                    Species composition is conservatively scored as monoculture since we cannot detect mixed species from satellite data alone.
+                    For accurate biodiversity assessment, on-site surveys are recommended.
                   </p>
                 </div>
               </>
