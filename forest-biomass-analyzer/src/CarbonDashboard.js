@@ -11,6 +11,13 @@ import {
   estimateCarbonCreditValue,
   EU_ETS_PRICE_PER_TON
 } from './carbonCalculation';
+import {
+  assessCertificationEligibility,
+  estimateAdditionalityGap,
+  calculateCertificationROI,
+  calculateGroupViability,
+  VOLUNTARY_CREDIT_PRICE
+} from './carbonCertification';
 
 const InfoButton = ({ id, showInfo, setShowInfo, children }) => (
   <span style={{ position: 'relative', display: 'inline-block' }}>
@@ -101,6 +108,22 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
       optimal: parseFloat(scenarioData.optimal.data[i].co2ePerHa.toFixed(1))
     }));
   }, [scenarioData]);
+
+  // Carbon Certification calculations
+  const certificationData = useMemo(() => {
+    if (!scenarioData) return null;
+
+    const eligibility = assessCertificationEligibility(forestType, forestAge, areaHectares, 70);
+    const additionality = estimateAdditionalityGap(scenarioData);
+    const groupViability = calculateGroupViability(areaHectares);
+
+    let roi = null;
+    if (additionality && additionality.additionalityPerYear > 0) {
+      roi = calculateCertificationROI(additionality.additionalityPerYear, areaHectares);
+    }
+
+    return { eligibility, additionality, roi, groupViability };
+  }, [scenarioData, forestType, forestAge, areaHectares]);
 
   if (!timberValue || !biomassData || biomassData.length === 0) {
     return null;
@@ -274,6 +297,86 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
               <Line type="monotone" dataKey="optimal" stroke="#3498db" strokeWidth={2} dot={false} name="Optimal" />
             </LineChart>
           </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Carbon Certification Pathway */}
+      {certificationData && (
+        <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f0faf0', borderRadius: '8px', border: '1px solid #c3e6cb' }}>
+          <h5 style={{ margin: '0 0 10px 0', color: '#155724', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            Carbon Credit Certification Pathway
+            <InfoButton id="certPathway" showInfo={showInfo} setShowInfo={setShowInfo}>
+              Converts the theoretical carbon credit value above into actionable certification steps. Additionality = extra carbon sequestered by NOT harvesting vs. business-as-usual. Three schemes assessed: Verra VCS (international, 100ha min), Gold Standard (premium, 50ha min), Finnish National (small holdings, 5ha min). ROI uses voluntary market avg price of €{VOLUNTARY_CREDIT_PRICE.avg}/t CO2e.
+            </InfoButton>
+          </h5>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '15px' }}>
+            {certificationData.additionality && (
+              <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
+                <div style={{ fontSize: '11px', color: '#155724', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                  Additionality
+                  <InfoButton id="certAdditionality" showInfo={showInfo} setShowInfo={setShowInfo}>
+                    Annual extra CO2 sequestered by continuing to grow vs. harvesting now. This is what you can sell as carbon credits — the difference between your management choice and business-as-usual.
+                  </InfoButton>
+                </div>
+                <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#27ae60', margin: '6px 0' }}>
+                  {certificationData.additionality.additionalityPerYear.toFixed(2)} t/yr
+                </div>
+                <div style={{ fontSize: '11px', color: '#888' }}>
+                  {(certificationData.additionality.additionalityPerYear * areaHectares).toFixed(1)} t CO2e/yr total
+                </div>
+              </div>
+            )}
+
+            {certificationData.roi && (
+              <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
+                <div style={{ fontSize: '11px', color: '#155724', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                  ROI / Breakeven
+                  <InfoButton id="certROI" showInfo={showInfo} setShowInfo={setShowInfo}>
+                    20-year return on certification investment. Costs: initial audit €15,000, annual verification €5,000, registry €0.30/credit. Revenue at €{VOLUNTARY_CREDIT_PRICE.avg}/t CO2e voluntary market average.
+                  </InfoButton>
+                </div>
+                <div style={{ fontSize: '22px', fontWeight: 'bold', color: certificationData.roi.netValue >= 0 ? '#27ae60' : '#e74c3c', margin: '6px 0' }}>
+                  {certificationData.roi.breakevenYear ? `Year ${certificationData.roi.breakevenYear}` : 'N/A'}
+                </div>
+                <div style={{ fontSize: '11px', color: '#888' }}>
+                  Net 20yr: €{certificationData.roi.netValue.toFixed(0)}
+                </div>
+              </div>
+            )}
+
+            <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
+              <div style={{ fontSize: '11px', color: '#155724', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                Group Size Needed
+                <InfoButton id="certGroup" showInfo={showInfo} setShowInfo={setShowInfo}>
+                  Group certification pools multiple forest owners to share audit costs. Minimum viable area is 200 ha. If your area is smaller, this shows how many owners of similar size are needed to form a group.
+                </InfoButton>
+              </div>
+              <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#2c3e50', margin: '6px 0' }}>
+                {certificationData.groupViability.viable ? '1 (Independent)' : `${certificationData.groupViability.membersNeeded} owners`}
+              </div>
+              <div style={{ fontSize: '11px', color: '#888' }}>
+                {certificationData.groupViability.viable
+                  ? `€${certificationData.groupViability.costPerHectare.toFixed(0)}/ha over 5yr`
+                  : `Gap: ${certificationData.groupViability.areaGap.toFixed(0)} ha`}
+              </div>
+            </div>
+
+            <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
+              <div style={{ fontSize: '11px', color: '#155724', fontWeight: 'bold', textTransform: 'uppercase' }}>Eligible Schemes</div>
+              <div style={{ fontSize: '12px', marginTop: '6px', textAlign: 'left' }}>
+                {Object.values(certificationData.eligibility).map((scheme, i) => (
+                  <div key={i} style={{ marginBottom: '3px' }}>
+                    <span style={{
+                      display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%',
+                      backgroundColor: scheme.eligible ? '#27ae60' : '#e74c3c', marginRight: '6px'
+                    }} />
+                    <span style={{ fontSize: '11px', color: scheme.eligible ? '#333' : '#999' }}>{scheme.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

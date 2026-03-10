@@ -22,7 +22,7 @@ export const SOIL_CARBON_TONS_PER_HA = {
 };
 
 // Basic density (tons/m³) for biomass-to-volume conversion
-const BASIC_DENSITY = {
+export const BASIC_DENSITY = {
   pine: 0.42,
   fir: 0.38,
   birch: 0.49,
@@ -30,7 +30,7 @@ const BASIC_DENSITY = {
 };
 
 // Average Finnish timber prices (Luke 2024, €/m³)
-const TIMBER_PRICES = {
+export const TIMBER_PRICES = {
   pine: { sawlog: 72, pulpwood: 32 },
   fir: { sawlog: 78, pulpwood: 30 },
   birch: { sawlog: 52, pulpwood: 28 },

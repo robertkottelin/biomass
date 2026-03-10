@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { MapContainer, TileLayer, FeatureGroup, Polygon, useMap } from 'react-leaflet';
-import { Line, LineChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { Line, LineChart, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { estimateTreeCount } from './treeEstimation';
 import { analyzeForestHealth } from './healthEstimation';
 import { estimateBiomass, calculateRollingAverage } from './dataProcessing';
 import CarbonDashboard from './CarbonDashboard';
 import { estimateBiodiversity } from './biodiversityEstimation';
+import { calculatePriceRange, analyzeHarvestDelay, STANDING_SALE_DISCOUNT } from './timberMarket';
+import { assessDeforestationRisk, generateComplianceReport } from './eudrCompliance';
+import { assessMetsoEligibility, estimateMetsoCompensation, assessNRLCompliance, compareProtectionVsHarvest } from './regulatoryCompliance';
+import { calculateInheritanceTax, projectManagementScenarios, generateAssetSummary, estimateManagementWorkload, LAND_VALUE_PER_HA } from './successionPlanning';
+import { estimateTimberValue, biomassToCarbon, estimateCarbonCreditValue, EU_ETS_PRICE_PER_TON, BASIC_DENSITY } from './carbonCalculation';
 import 'leaflet/dist/leaflet.css';
 
 // Fix Leaflet icon issue
@@ -1927,6 +1932,97 @@ const ndviArray = rasters[0];  // Float32Array`}
               </>
             )}
 
+            {/* 3b. Timber Market & Pricing */}
+            {biomassData.length > 0 && (() => {
+              const currentType = selectedForests[selectedForestIndex].type;
+              const currentArea = parseFloat(selectedForests[selectedForestIndex].area);
+              const latestBiomass = biomassData[biomassData.length - 1].biomass;
+              const priceRange = calculatePriceRange(latestBiomass, currentType, forestAge, currentArea);
+              const harvestDelay = analyzeHarvestDelay(currentType, forestAge, currentArea);
+
+              return (
+                <>
+                  <h4>3b. Timber Market & Pricing</h4>
+                  <div style={{ backgroundColor: '#fef9e7', padding: '15px', borderRadius: '6px', marginBottom: '20px', border: '1px solid #f0e68c' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '15px' }}>
+                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
+                        <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          Price Range (Delivery)
+                          <InfoButton id="marketPriceRange" showInfo={showInfo} setShowInfo={setShowInfo}>
+                            Low/Avg/High delivery-sale prices based on Luke 2024 price statistics across Finnish timber buyers. Delivery sale = you handle harvesting and transport to mill. Includes sawlog, pulpwood, and energy wood volumes.
+                          </InfoButton>
+                        </div>
+                        <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#8b6914', margin: '6px 0' }}>
+                          €{priceRange.avg.toFixed(0)}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#888' }}>
+                          €{priceRange.low.toFixed(0)} — €{priceRange.high.toFixed(0)}
+                        </div>
+                      </div>
+
+                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
+                        <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          Standing Sale
+                          <InfoButton id="marketStanding" showInfo={showInfo} setShowInfo={setShowInfo}>
+                            Standing (pystykauppa) sale price = delivery price × {(STANDING_SALE_DISCOUNT * 100).toFixed(0)}%. Buyer handles all harvesting and transport. Lower price but zero work and risk for seller. Most common sale type in Finland.
+                          </InfoButton>
+                        </div>
+                        <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#8b6914', margin: '6px 0' }}>
+                          €{priceRange.standingSaleAvg.toFixed(0)}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#888' }}>
+                          €{priceRange.standingSaleLow.toFixed(0)} — €{priceRange.standingSaleHigh.toFixed(0)}
+                        </div>
+                      </div>
+
+                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
+                        <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          Volume Breakdown
+                          <InfoButton id="marketVolume" showInfo={showInfo} setShowInfo={setShowInfo}>
+                            Timber split into sawlog (high-value logs for lumber), pulpwood (for paper/board), and energy wood (branches, tops, small-diameter). Sawlog fraction increases with forest age — older forests produce more valuable timber.
+                          </InfoButton>
+                        </div>
+                        <div style={{ fontSize: '13px', margin: '6px 0', lineHeight: '1.6' }}>
+                          <div>Sawlog: <strong>{(priceRange.sawlogFraction * 100).toFixed(0)}%</strong> ({priceRange.sawlogVolume.toFixed(0)} m³/ha)</div>
+                          <div>Pulpwood: <strong>{(priceRange.pulpwoodFraction * 100).toFixed(0)}%</strong> ({priceRange.pulpwoodVolume.toFixed(0)} m³/ha)</div>
+                          <div>Energy: <strong>10%</strong> ({priceRange.energyWoodVolume.toFixed(0)} m³/ha)</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Harvest Delay Analysis */}
+                    <h5 style={{ margin: '0 0 5px 0', color: '#333', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      Harvest Delay Analysis
+                      <InfoButton id="marketDelay" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        Projects timber value if you wait 1, 3, or 5 years before harvesting. Nominal = future timber value. Discounted = adjusted for time value of money at 3% forestry discount rate. A positive discounted gain means waiting is financially better than harvesting now and investing the proceeds.
+                      </InfoButton>
+                    </h5>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <LineChart data={[
+                        { name: 'Now', nominal: harvestDelay.currentValue, discounted: harvestDelay.currentValue },
+                        ...harvestDelay.projections.map(p => ({
+                          name: `+${p.delayYears}yr`,
+                          nominal: p.nominalValue,
+                          discounted: p.discountedValue
+                        }))
+                      ]}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => v >= 1000 ? `€${(v / 1000).toFixed(0)}k` : `€${v}`} />
+                        <Tooltip formatter={(val) => [`€${Number(val).toLocaleString()}`]} />
+                        <Legend wrapperStyle={{ fontSize: '12px' }} />
+                        <Line type="monotone" dataKey="nominal" stroke="#8b6914" strokeWidth={2} name="Nominal Value" />
+                        <Line type="monotone" dataKey="discounted" stroke="#e67e22" strokeWidth={2} strokeDasharray="4 4" name="Discounted (3%)" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                    <p style={{ fontSize: '11px', color: '#666', margin: '5px 0 0 0', fontStyle: 'italic' }}>
+                      Prices based on Luke 2024 Finnish timber price statistics. UPM, Stora Enso, and Metsä Group control ~80% of purchases — compare offers from multiple buyers.
+                    </p>
+                  </div>
+                </>
+              );
+            })()}
+
             {healthEstimate && (
               <>
                 <h4>4. Forest Health Assessment</h4>
@@ -2218,6 +2314,332 @@ const ndviArray = rasters[0];  // Float32Array`}
                 </div>
               </>
             )}
+
+            {/* 6. EUDR Compliance */}
+            {biomassData.length > 0 && (() => {
+              const riskAssessment = assessDeforestationRisk(biomassData);
+              if (!riskAssessment) return null;
+
+              const currentType = selectedForests[selectedForestIndex].type;
+              const currentArea = parseFloat(selectedForests[selectedForestIndex].area);
+              const coords = selectedForests[selectedForestIndex].coords;
+              const report = generateComplianceReport(biomassData, coords, currentType, currentArea);
+
+              return (
+                <>
+                  <h4>6. EUDR Compliance</h4>
+                  <div style={{ backgroundColor: '#f8f9fa', padding: '15px', borderRadius: '6px', marginBottom: '20px', border: `2px solid ${riskAssessment.riskColor}` }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '15px' }}>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          Risk Classification
+                          <InfoButton id="eudrRisk" showInfo={showInfo} setShowInfo={setShowInfo}>
+                            EU Deforestation Regulation (EUDR, effective Dec 2026) requires proof that timber products are not linked to deforestation after Dec 31, 2020. Risk is assessed by comparing pre-2021 and post-2020 NDVI baselines from satellite data. Negligible (≥90% continuity), Low (≥75%), Standard (≥60%), High ({'<'}60%).
+                          </InfoButton>
+                        </div>
+                        <div style={{ fontSize: '32px', fontWeight: 'bold', color: riskAssessment.riskColor, margin: '8px 0' }}>
+                          {riskAssessment.riskLevel}
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#555' }}>{riskAssessment.reason}</div>
+                      </div>
+
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          Continuity Score
+                          <InfoButton id="eudrContinuity" showInfo={showInfo} setShowInfo={setShowInfo}>
+                            Ratio of post-2020 average yearly peak NDVI to pre-2021 baseline. 100% = no change in forest cover. Values below 90% trigger additional due diligence requirements.
+                          </InfoButton>
+                        </div>
+                        <div style={{ fontSize: '32px', fontWeight: 'bold', color: riskAssessment.riskColor, margin: '8px 0' }}>
+                          {riskAssessment.continuityRatio != null ? `${riskAssessment.continuityRatio.toFixed(1)}%` : 'N/A'}
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#555' }}>
+                          Pre-2021: {riskAssessment.dataPoints.pre} pts / Post-2020: {riskAssessment.dataPoints.post} pts
+                        </div>
+                      </div>
+
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase' }}>Compliance Status</div>
+                        <div style={{
+                          fontSize: '18px', fontWeight: 'bold', margin: '8px 0',
+                          padding: '6px 12px', borderRadius: '4px',
+                          backgroundColor: report && report.complianceStatus === 'Compliant' ? '#d4edda' :
+                            report && report.complianceStatus === 'Requires Investigation' ? '#fff3cd' : '#f8d7da',
+                          color: report && report.complianceStatus === 'Compliant' ? '#155724' :
+                            report && report.complianceStatus === 'Requires Investigation' ? '#856404' : '#721c24'
+                        }}>
+                          {report ? report.complianceStatus : 'Unknown'}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#888' }}>EUDR reference date: 2020-12-31</div>
+                      </div>
+                    </div>
+
+                    {/* Evidence Timeline */}
+                    {report && report.evidenceTimeline.length > 0 && (
+                      <div style={{ marginTop: '10px' }}>
+                        <h5 style={{ margin: '0 0 5px 0', color: '#333', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          NDVI Evidence Timeline
+                          <InfoButton id="eudrTimeline" showInfo={showInfo} setShowInfo={setShowInfo}>
+                            Yearly peak NDVI values showing forest cover continuity across the EUDR reference date (Dec 31, 2020). Green bars = pre-reference period, blue bars = post-reference. Consistent values demonstrate continuous forest cover.
+                          </InfoButton>
+                        </h5>
+                        <ResponsiveContainer width="100%" height={200}>
+                          <LineChart data={report.evidenceTimeline}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="year" tick={{ fontSize: 11 }} />
+                            <YAxis domain={[0, 1]} tick={{ fontSize: 11 }} label={{ value: 'Peak NDVI', angle: -90, position: 'insideLeft', fontSize: 11 }} />
+                            <Tooltip formatter={(val) => [val, 'Peak NDVI']} />
+                            <ReferenceLine x={2020} stroke="#e74c3c" strokeWidth={2} strokeDasharray="4 4" label={{ value: 'EUDR Ref', position: 'top', fontSize: 10, fill: '#e74c3c' }} />
+                            <Line type="monotone" dataKey="peakNdvi" stroke="#27ae60" strokeWidth={2} dot={{ fill: '#27ae60', r: 4 }} name="Peak NDVI" />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {report && report.recommendations.length > 0 && (
+                      <div style={{ marginTop: '10px' }}>
+                        <strong style={{ fontSize: '12px' }}>Recommendations:</strong>
+                        <ul style={{ margin: '5px 0', paddingLeft: '20px', fontSize: '12px', color: '#555' }}>
+                          {report.recommendations.map((rec, i) => (
+                            <li key={i} style={{ marginBottom: '3px' }}>{rec}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
+                      EUDR compliance assessment based on satellite NDVI continuity analysis. This is a screening tool — formal compliance requires operator-level due diligence documentation per Regulation (EU) 2023/1115.
+                    </p>
+                  </div>
+                </>
+              );
+            })()}
+
+            {/* 7. Conservation & Subsidies (METSO + NRL) */}
+            {biodiversityEstimate && biomassData.length > 0 && (() => {
+              const currentType = selectedForests[selectedForestIndex].type;
+              const currentArea = parseFloat(selectedForests[selectedForestIndex].area);
+              const latestBiomass = biomassData[biomassData.length - 1].biomass;
+              const density = BASIC_DENSITY[currentType] || BASIC_DENSITY.pine;
+              const volumePerHa = latestBiomass / density;
+              const timberVal = estimateTimberValue(latestBiomass, currentType, forestAge, currentArea);
+              const carbonData = biomassToCarbon(latestBiomass, currentType);
+              const creditVal = estimateCarbonCreditValue(carbonData.co2eTons * currentArea);
+
+              const metso = assessMetsoEligibility(currentType, forestAge, biodiversityEstimate.overallScore, currentArea);
+              const permanentComp = estimateMetsoCompensation(timberVal.totalValue, 'permanent');
+              const temporaryComp = estimateMetsoCompensation(timberVal.totalValue, 'temporary');
+              const nrl = assessNRLCompliance(currentType, forestAge, volumePerHa);
+              const tradeoff = compareProtectionVsHarvest(timberVal.totalValue, permanentComp.lumpSum, creditVal.totalValue);
+
+              return (
+                <>
+                  <h4>7. Conservation & Subsidies</h4>
+                  <div style={{ backgroundColor: '#eaf5ea', padding: '15px', borderRadius: '6px', marginBottom: '20px', border: '1px solid #c3e6cb' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '15px' }}>
+                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
+                        <div style={{ fontSize: '11px', color: '#155724', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          METSO Class
+                          <InfoButton id="metsoClass" showInfo={showInfo} setShowInfo={setShowInfo}>
+                            METSO is Finland's voluntary forest conservation programme (€21.7M available). Class I = highest conservation value (old-growth, high biodiversity). Class II = significant value. Class III = potential value with restoration. Classification based on forest age and biodiversity score thresholds specific to each tree species.
+                          </InfoButton>
+                        </div>
+                        <div style={{ fontSize: '28px', fontWeight: 'bold', color: metso.eligible ? '#27ae60' : '#888', margin: '6px 0' }}>
+                          {metso.metsoClass ? `Class ${metso.metsoClass}` : 'Not Eligible'}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#555' }}>{metso.label}</div>
+                        {metso.nextClassRequirements && (
+                          <div style={{ fontSize: '10px', color: '#888', marginTop: '4px' }}>
+                            Next: Class {metso.nextClassRequirements.targetClass}
+                            {metso.nextClassRequirements.ageNeeded > 0 && ` (${metso.nextClassRequirements.ageNeeded}yr more)`}
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
+                        <div style={{ fontSize: '11px', color: '#155724', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          Compensation Value
+                          <InfoButton id="metsoComp" showInfo={showInfo} setShowInfo={setShowInfo}>
+                            METSO compensation: permanent protection pays 100% of timber value as lump sum. 20-year temporary protection pays 70% upfront plus annual management payment (~2%/yr). Compensation is tax-free for permanent protection under certain conditions.
+                          </InfoButton>
+                        </div>
+                        <div style={{ fontSize: '13px', margin: '6px 0', lineHeight: '1.8' }}>
+                          <div>Permanent: <strong style={{ color: '#27ae60' }}>€{permanentComp.lumpSum.toFixed(0)}</strong></div>
+                          <div>20yr temp: <strong style={{ color: '#f39c12' }}>€{temporaryComp.totalOver20Years.toFixed(0)}</strong></div>
+                          <div style={{ fontSize: '10px', color: '#888' }}>({temporaryComp.description})</div>
+                        </div>
+                      </div>
+
+                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
+                        <div style={{ fontSize: '11px', color: '#155724', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          NRL Status
+                          <InfoButton id="nrlStatus" showInfo={showInfo} setShowInfo={setShowInfo}>
+                            EU Nature Restoration Law targets for boreal forests: deadwood ≥20 m³/ha, retention trees ≥10/ha at harvest, uneven-aged structure. Deadwood is estimated from forest age and standing volume. Young managed forests typically have deadwood deficits.
+                          </InfoButton>
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: nrl.overallStatus === 'Compliant' ? '#27ae60' : '#f39c12', margin: '6px 0' }}>
+                          {nrl.overallStatus}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#555' }}>
+                          {nrl.compliantCount}/{nrl.totalTargets} targets met
+                        </div>
+                        {nrl.targets.filter(t => t.gap).map((t, i) => (
+                          <div key={i} style={{ fontSize: '10px', color: '#e67e22', marginTop: '2px' }}>{t.name}: {t.gap}</div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Protection vs Harvest comparison */}
+                    <h5 style={{ margin: '0 0 5px 0', color: '#333', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      Protection vs Harvest
+                      <InfoButton id="protVsHarvest" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        Compares the financial value of harvesting timber vs. enrolling in METSO protection (compensation + carbon credit value). Protection value = METSO compensation (100% timber value) + theoretical carbon credit value. A positive difference means protection is financially competitive with harvesting.
+                      </InfoButton>
+                    </h5>
+                    <ResponsiveContainer width="100%" height={180}>
+                      <BarChart data={[
+                        { name: 'Harvest', value: tradeoff.harvestValue },
+                        { name: 'Protection', value: tradeoff.protectValue }
+                      ]} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => v >= 1000 ? `€${(v / 1000).toFixed(0)}k` : `€${v}`} />
+                        <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={80} />
+                        <Tooltip formatter={(val) => [`€${Number(val).toLocaleString()}`]} />
+                        <Bar dataKey="value" barSize={24}>
+                          <Cell fill="#e67e22" />
+                          <Cell fill="#27ae60" />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                    <div style={{ textAlign: 'center', fontSize: '12px', color: tradeoff.betterOption === 'protection' ? '#27ae60' : '#e67e22', fontWeight: 'bold', marginTop: '5px' }}>
+                      {tradeoff.betterOption === 'protection'
+                        ? `Protection is €${tradeoff.difference.toFixed(0)} more valuable (incl. carbon credits)`
+                        : `Harvest yields €${Math.abs(tradeoff.difference).toFixed(0)} more than protection`}
+                    </div>
+
+                    {nrl.recommendations.length > 0 && (
+                      <div style={{ marginTop: '10px' }}>
+                        <strong style={{ fontSize: '12px' }}>NRL Recommendations:</strong>
+                        <ul style={{ margin: '5px 0', paddingLeft: '20px', fontSize: '12px', color: '#555' }}>
+                          {nrl.recommendations.map((rec, i) => (
+                            <li key={i} style={{ marginBottom: '3px' }}>{rec}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
+                      METSO eligibility is indicative — actual classification requires ELY Centre site assessment. NRL targets based on EU Nature Restoration Law proposal for boreal forests.
+                    </p>
+                  </div>
+                </>
+              );
+            })()}
+
+            {/* 8. Succession Planning */}
+            {biomassData.length > 0 && (() => {
+              const currentType = selectedForests[selectedForestIndex].type;
+              const currentArea = parseFloat(selectedForests[selectedForestIndex].area);
+              const latestBiomass = biomassData[biomassData.length - 1].biomass;
+              const timberVal = estimateTimberValue(latestBiomass, currentType, forestAge, currentArea);
+              const carbonData = biomassToCarbon(latestBiomass, currentType);
+              const creditVal = estimateCarbonCreditValue(carbonData.co2eTons * currentArea);
+              const landVal = LAND_VALUE_PER_HA.south * currentArea; // Default to south Finland
+
+              const assetSummary = generateAssetSummary(timberVal.totalValue, landVal, creditVal.totalValue, currentArea);
+              const inheritanceTax = calculateInheritanceTax(assetSummary.totalValue);
+              const scenarios = projectManagementScenarios(currentType, forestAge, currentArea, 30);
+              const activeWorkload = estimateManagementWorkload(currentArea, 'active');
+              const holdWorkload = estimateManagementWorkload(currentArea, 'hold');
+
+              const scenarioChartData = scenarios.active.data.map((d, i) => ({
+                year: d.year,
+                active: Math.round(d.value),
+                hold: Math.round(scenarios.hold.data[i].value),
+                sellInvest: Math.round(scenarios.sellInvest.data[i].value)
+              }));
+
+              return (
+                <>
+                  <h4>8. Succession Planning</h4>
+                  <div style={{ backgroundColor: '#f5f0ff', padding: '15px', borderRadius: '6px', marginBottom: '20px', border: '1px solid #d5c8f0' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '15px' }}>
+                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
+                        <div style={{ fontSize: '11px', color: '#5b3a8c', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          Total Asset Value
+                          <InfoButton id="succAsset" showInfo={showInfo} setShowInfo={setShowInfo}>
+                            Total estate value = standing timber + land value + theoretical carbon credits. Land value uses Southern Finland average (€{LAND_VALUE_PER_HA.south}/ha, Tax Authority 2024). Timber from current biomass estimate. Carbon credits at EU ETS price (theoretical — requires certification).
+                          </InfoButton>
+                        </div>
+                        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#5b3a8c', margin: '6px 0' }}>
+                          €{assetSummary.totalValue.toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#888' }}>€{assetSummary.perHectare.toLocaleString()}/ha</div>
+                        <div style={{ fontSize: '10px', color: '#aaa', marginTop: '4px' }}>
+                          Timber {assetSummary.breakdown.timberPercent}% / Land {assetSummary.breakdown.landPercent}% / Carbon {assetSummary.breakdown.carbonPercent}%
+                        </div>
+                      </div>
+
+                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
+                        <div style={{ fontSize: '11px', color: '#5b3a8c', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          Inheritance Tax (Class I)
+                          <InfoButton id="succTax" showInfo={showInfo} setShowInfo={setShowInfo}>
+                            Finnish inheritance tax for Class I heirs (children, spouse). Forest property is taxed at {(inheritanceTax.taxRatio * 100)}% of fair market value (forest tax value ratio). Progressive rates: 7-19% depending on taxable value. Brackets: €20k-40k at 7%, €40k-60k at 10%, €60k-200k at 13%, €200k-1M at 16%, over €1M at 19%.
+                          </InfoButton>
+                        </div>
+                        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#e74c3c', margin: '6px 0' }}>
+                          €{inheritanceTax.tax.toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#888' }}>
+                          Effective rate: {inheritanceTax.effectiveRate.toFixed(1)}%
+                        </div>
+                        <div style={{ fontSize: '10px', color: '#aaa', marginTop: '4px' }}>
+                          Taxable value: €{inheritanceTax.taxableValue.toLocaleString()} ({(inheritanceTax.taxRatio * 100)}% of FMV)
+                        </div>
+                      </div>
+
+                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
+                        <div style={{ fontSize: '11px', color: '#5b3a8c', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          Annual Workload
+                          <InfoButton id="succWorkload" showInfo={showInfo} setShowInfo={setShowInfo}>
+                            Estimated hours per year for forest management. Active management: ~3.5 hrs/ha (planning, marking trees, supervising harvest, tending) + 10hrs overhead. Hold strategy: ~0.5 hrs/ha (monitoring, boundary maintenance). Average Finnish forest owner age is 62 — workload is a key succession factor.
+                          </InfoButton>
+                        </div>
+                        <div style={{ fontSize: '13px', margin: '6px 0', lineHeight: '1.8' }}>
+                          <div>Active: <strong>{activeWorkload.totalHoursPerYear} hrs/yr</strong></div>
+                          <div>Hold: <strong>{holdWorkload.totalHoursPerYear} hrs/yr</strong></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Management Scenarios Chart */}
+                    <h5 style={{ margin: '0 0 5px 0', color: '#333', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      30-Year Management Scenarios
+                      <InfoButton id="succScenarios" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        Three strategies compared over 30 years. "Active" = harvest at optimal rotation age, replant, accumulate harvest income. "Hold" = let forest grow undisturbed. "Sell + Invest" = sell timber now, invest proceeds at 5% annual market return. Values include both standing timber and cumulative income (for active strategy).
+                      </InfoButton>
+                    </h5>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <LineChart data={scenarioChartData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="year" tick={{ fontSize: 11 }} label={{ value: 'Years from now', position: 'insideBottom', offset: -5, fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => v >= 1000 ? `€${(v / 1000).toFixed(0)}k` : `€${v}`} />
+                        <Tooltip formatter={(val) => [`€${Number(val).toLocaleString()}`]} />
+                        <Legend wrapperStyle={{ fontSize: '12px' }} />
+                        <Line type="monotone" dataKey="active" stroke="#27ae60" strokeWidth={2} dot={false} name={scenarios.active.label} />
+                        <Line type="monotone" dataKey="hold" stroke="#3498db" strokeWidth={2} dot={false} name={scenarios.hold.label} />
+                        <Line type="monotone" dataKey="sellInvest" stroke="#e74c3c" strokeWidth={2} strokeDasharray="4 4" dot={false} name={scenarios.sellInvest.label} />
+                      </LineChart>
+                    </ResponsiveContainer>
+
+                    <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
+                      Succession planning estimates use Finnish Tax Authority 2024 rates and Southern Finland land values. 40% of Finnish forest transfers are unplanned — consider formalizing a succession plan.
+                      Consult a forest tax specialist for binding tax calculations.
+                    </p>
+                  </div>
+                </>
+              );
+            })()}
 
             <p style={{ fontSize: '12px', marginTop: '20px', padding: '10px', backgroundColor: '#f0f8ff', borderRadius: '4px' }}>
               <strong>Processing Summary:</strong> {biomassData.length > 0 ?
