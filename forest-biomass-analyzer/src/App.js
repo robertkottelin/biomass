@@ -2257,13 +2257,13 @@ const ndviArray = rasters[0];  // Float32Array`}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                       <span style={{ fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase', color: '#555' }}>Biodiversity Score</span>
                       <InfoButton id="bioScore" showInfo={showInfo} setShowInfo={setShowInfo}>
-                        <strong>Weighted composite score (0-100):</strong>
+                        <strong>Weighted composite score (0-100) from satellite-measurable indicators only:</strong>
                         <ul style={{ margin: '4px 0', paddingLeft: '18px' }}>
-                          <li><strong>Structural Diversity (40%):</strong> NDVI spatial variance (canopy heterogeneity), canopy cover optimality (60-85% ideal per Finnish forestry science), and crown diameter maturity relative to species maximum.</li>
-                          <li><strong>Species Composition (30%):</strong> Fixed at 30/100 for monoculture stands — remote sensing cannot reliably detect species mix from a single polygon type. Honest limitation.</li>
-                          <li><strong>Age/Maturity (15%):</strong> min(age / mature age, 1). Older forests provide more habitat niches (Kuuluvainen & Aakala, 2011).</li>
-                          <li><strong>Health Factor (15%):</strong> From spectral health assessment. Healthy forests support more biodiversity.</li>
+                          <li><strong>Structural Diversity (55%):</strong> NDVI spatial variance (canopy heterogeneity), canopy cover optimality (60-85% ideal per Finnish forestry science), and crown diameter maturity relative to species maximum.</li>
+                          <li><strong>Age/Maturity (25%):</strong> min(age / mature age, 1). Older forests provide more habitat niches (Kuuluvainen & Aakala, 2011).</li>
+                          <li><strong>Health Factor (20%):</strong> From spectral health assessment. Healthy forests support more biodiversity.</li>
                         </ul>
+                        Species composition is excluded — satellite data cannot reliably distinguish tree species from a single polygon. A field survey would be needed.
                         Score {'>'} 70 = Good, {'>'} 50 = Moderate, {'<='} 50 = Low.
                       </InfoButton>
                     </div>
@@ -2286,9 +2286,10 @@ const ndviArray = rasters[0];  // Float32Array`}
                     </div>
                     <div style={{ backgroundColor: 'rgba(255,255,255,0.6)', padding: '10px', borderRadius: '6px', textAlign: 'center' }}>
                       <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>Species Composition <InfoButton id="bioSpecies" showInfo={showInfo} setShowInfo={setShowInfo}>
-                        Fixed at 30/100 for monoculture stands. We cannot detect mixed species from a single forest type polygon. Finnish forests with 3+ tree species score significantly higher in biodiversity surveys (Vanha-Majamaa & Jalonen, 2001). Add broadleaves to conifer stands for improvement.
+                        Satellite data cannot reliably detect species mix from a single forest type polygon. Finnish forests with 3+ tree species score significantly higher in biodiversity surveys (Vanha-Majamaa & Jalonen, 2001). A field survey or multi-spectral species classification would be needed for a real score.
                       </InfoButton></div>
-                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2c3e50' }}>{biodiversityEstimate.speciesComposition}</div>
+                      <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#999' }}>N/A</div>
+                      <div style={{ fontSize: '10px', color: '#aaa' }}>Requires field survey</div>
                     </div>
                     <div style={{ backgroundColor: 'rgba(255,255,255,0.6)', padding: '10px', borderRadius: '6px', textAlign: 'center' }}>
                       <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>Age/Maturity <InfoButton id="bioAge" showInfo={showInfo} setShowInfo={setShowInfo}>
@@ -2343,7 +2344,10 @@ const ndviArray = rasters[0];  // Float32Array`}
                         <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
                           Risk Classification
                           <InfoButton id="eudrRisk" showInfo={showInfo} setShowInfo={setShowInfo}>
-                            EU Deforestation Regulation (EUDR, effective Dec 2026) requires proof that timber products are not linked to deforestation after Dec 31, 2020. Risk is assessed by comparing pre-2021 and post-2020 NDVI baselines from satellite data. Negligible (≥90% continuity), Low (≥75%), Standard (≥60%), High ({'<'}60%).
+                            <div><strong>What is EUDR?</strong> The EU Deforestation Regulation (EU 2023/1115) takes effect Dec 30, 2025 (large operators) / Jun 30, 2026 (SMEs). It requires anyone placing timber, soy, palm oil, cattle, cocoa, coffee, or rubber products on the EU market to prove the commodities were not produced on land deforested after Dec 31, 2020.</div>
+                            <div style={{ marginTop: '6px' }}><strong>What does this tool do?</strong> We compare pre-2021 and post-2020 peak NDVI from Sentinel-2 satellite imagery to estimate whether forest cover has been maintained. This gives you an early screening of deforestation risk — before investing in formal due diligence.</div>
+                            <div style={{ marginTop: '6px' }}><strong>Risk levels:</strong> Negligible (≥90% NDVI continuity) = forest intact. Low (≥75%) = minor change, document it. Standard (≥60%) = investigate further. High ({'<'}60%) = significant loss detected.</div>
+                            <div style={{ marginTop: '6px' }}><strong>What this is NOT:</strong> This screening does not replace the formal due diligence statement (DDS) that operators must submit through the EU Information System. You still need geo-located plot coordinates, supply chain documentation, and potentially third-party verification.</div>
                           </InfoButton>
                         </div>
                         <div style={{ fontSize: '32px', fontWeight: 'bold', color: riskAssessment.riskColor, margin: '8px 0' }}>
@@ -2417,7 +2421,7 @@ const ndviArray = rasters[0];  // Float32Array`}
                     )}
 
                     <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
-                      EUDR compliance assessment based on satellite NDVI continuity analysis. This is a screening tool — formal compliance requires operator-level due diligence documentation per Regulation (EU) 2023/1115.
+                      This is a satellite-based screening tool for early risk assessment — not a compliance certificate. Formal EUDR compliance requires a Due Diligence Statement (DDS) submitted through the EU Information System, including geo-located supply chain data and operator-level documentation per Regulation (EU) 2023/1115.
                     </p>
                   </div>
                 </>

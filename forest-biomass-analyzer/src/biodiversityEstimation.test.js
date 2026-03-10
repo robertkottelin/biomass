@@ -42,9 +42,9 @@ describe('estimateBiodiversity', () => {
     });
   });
 
-  test('monoculture species score is 30', () => {
+  test('species composition is null (not measurable from satellite)', () => {
     const result = estimateBiodiversity(makeBiomassData(), makeTreeEstimate(), makeHealthEstimate(), 'pine', 40, 10);
-    expect(result.speciesComposition).toBe(30);
+    expect(result.speciesComposition).toBeNull();
   });
 
   test('old forest has higher age score than young forest', () => {

@@ -65,24 +65,23 @@ export function estimateBiodiversity(biomassData, treeEstimate, healthEstimate, 
     (ndviVarianceScore * 0.4 + canopyOptimalityScore * 0.3 + crownMaturityScore * 0.3)
   );
 
-  // --- 2. Species Composition (30%) ---
-  // Monoculture = 30/100 (honest — can't detect mixed species from single-type polygon)
-  const speciesComposition = 30;
+  // --- 2. Species Composition ---
+  // Cannot detect from satellite — excluded from scoring
+  const speciesComposition = null;
 
-  // --- 3. Age/Maturity Factor (15%) ---
+  // --- 3. Age/Maturity Factor (25%) ---
   const ageFactor = Math.round(Math.min(age / params.matureAge, 1) * 100);
 
-  // --- 4. Health Factor (15%) ---
+  // --- 4. Health Factor (20%) ---
   const healthFactor = healthEstimate && healthEstimate.healthScore != null
     ? healthEstimate.healthScore
     : 70;
 
-  // --- Overall Score ---
+  // --- Overall Score (excluding species composition — only measurable components) ---
   const overallScore = Math.round(
-    structuralDiversity * 0.40 +
-    speciesComposition * 0.30 +
-    ageFactor * 0.15 +
-    healthFactor * 0.15
+    structuralDiversity * 0.55 +
+    ageFactor * 0.25 +
+    healthFactor * 0.20
   );
 
   let overallLabel;
