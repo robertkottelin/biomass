@@ -37,19 +37,28 @@ export function calculateInheritanceTax(fairMarketValue, taxClass) {
   if (taxableValue <= brackets[0].max) return { tax: 0, effectiveRate: 0, taxableValue };
 
   let tax = 0;
+  let bracketRate = 0;
+  let bracketBase = 0;
+  let bracketMin = 0;
   for (let i = brackets.length - 1; i >= 0; i--) {
     if (taxableValue > brackets[i].min) {
-      tax = brackets[i].base + (taxableValue - brackets[i].min) * brackets[i].rate;
+      bracketRate = brackets[i].rate;
+      bracketBase = brackets[i].base;
+      bracketMin = brackets[i].min;
+      tax = bracketBase + (taxableValue - bracketMin) * bracketRate;
       break;
     }
   }
 
   return {
     tax: Math.round(tax),
-    effectiveRate: taxableValue > 0 ? (tax / taxableValue) * 100 : 0,
+    effectiveRate: fairMarketValue > 0 ? (tax / fairMarketValue) * 100 : 0,
     taxableValue: Math.round(taxableValue),
     fairMarketValue: Math.round(fairMarketValue),
-    taxRatio: FOREST_TAX_VALUE_RATIO
+    taxRatio: FOREST_TAX_VALUE_RATIO,
+    bracketRate,
+    bracketBase,
+    bracketMin
   };
 }
 

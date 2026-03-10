@@ -2587,17 +2587,28 @@ const ndviArray = rasters[0];  // Float32Array`}
                         <div style={{ fontSize: '11px', color: '#5b3a8c', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
                           Inheritance Tax (Class I)
                           <InfoButton id="succTax" showInfo={showInfo} setShowInfo={setShowInfo}>
-                            Finnish inheritance tax for Class I heirs (children, spouse). Forest property is taxed at {(inheritanceTax.taxRatio * 100)}% of fair market value (forest tax value ratio). Progressive rates: 7-19% depending on taxable value. Brackets: €20k-40k at 7%, €40k-60k at 10%, €60k-200k at 13%, €200k-1M at 16%, over €1M at 19%.
+                            <div>Finnish inheritance tax for Class I heirs (children, spouse).</div>
+                            <div style={{ marginTop: '6px' }}>
+                              <strong>Your calculation:</strong><br />
+                              1. Fair market value: €{inheritanceTax.fairMarketValue.toLocaleString()}<br />
+                              2. Forest tax ratio: {(inheritanceTax.taxRatio * 100)}% (Finnish Tax Authority values forest at {(inheritanceTax.taxRatio * 100)}% of FMV)<br />
+                              3. Taxable value: €{inheritanceTax.fairMarketValue.toLocaleString()} × {inheritanceTax.taxRatio} = <strong>€{inheritanceTax.taxableValue.toLocaleString()}</strong><br />
+                              4. Bracket: €{(inheritanceTax.bracketMin / 1000).toFixed(0)}k+ at {(inheritanceTax.bracketRate * 100)}% (base €{inheritanceTax.bracketBase.toLocaleString()})<br />
+                              5. Tax: €{inheritanceTax.bracketBase.toLocaleString()} + (€{inheritanceTax.taxableValue.toLocaleString()} − €{inheritanceTax.bracketMin.toLocaleString()}) × {(inheritanceTax.bracketRate * 100)}% = <strong>€{inheritanceTax.tax.toLocaleString()}</strong>
+                            </div>
+                            <div style={{ marginTop: '6px' }}>
+                              <strong>All brackets:</strong> €0-20k = 0%, €20k-40k = 7%, €40k-60k = 10%, €60k-200k = 13%, €200k-1M = 16%, over €1M = 19%.
+                            </div>
                           </InfoButton>
                         </div>
                         <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#e74c3c', margin: '6px 0' }}>
                           €{inheritanceTax.tax.toLocaleString()}
                         </div>
                         <div style={{ fontSize: '11px', color: '#888' }}>
-                          Effective rate: {inheritanceTax.effectiveRate.toFixed(1)}%
+                          {inheritanceTax.effectiveRate.toFixed(1)}% of fair market value
                         </div>
                         <div style={{ fontSize: '10px', color: '#aaa', marginTop: '4px' }}>
-                          Taxable value: €{inheritanceTax.taxableValue.toLocaleString()} ({(inheritanceTax.taxRatio * 100)}% of FMV)
+                          Taxable: €{inheritanceTax.taxableValue.toLocaleString()} ({(inheritanceTax.taxRatio * 100)}% of €{inheritanceTax.fairMarketValue.toLocaleString()})
                         </div>
                       </div>
 
