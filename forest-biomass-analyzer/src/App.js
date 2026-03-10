@@ -1674,8 +1674,17 @@ const ndviArray = rasters[0];  // Float32Array`}
         onClick={fetchSatelliteData}
         disabled={loading || selectedForests.length === 0 || !authenticated}
       >
-        {loading ? 'Processing Satellite Data...' : 'Analyze with Process API'}
+        {loading ? 'Processing Satellite Data...' : 'Analyze with Sentinel-2 Process API'}
       </button>
+
+      {!loading && biomassData.length > 0 && (
+        <p style={{ fontSize: '12px', marginTop: '10px', padding: '10px', backgroundColor: '#f0f8ff', borderRadius: '4px' }}>
+          <strong>Processing Summary:</strong> Analyzed {biomassData.length} Sentinel-2 acquisitions over {((new Date(biomassData[biomassData.length - 1].date) - new Date(biomassData[0].date)) / 31536000000).toFixed(1)} years
+          with {(biomassData.reduce((sum, d) => sum + parseFloat(d.coverage), 0) / biomassData.length).toFixed(1)}% average cloud-free coverage.
+          Biomass increased from {biomassData[0].biomass.toFixed(1)} to {biomassData[biomassData.length - 1].biomass.toFixed(1)} tons/ha,
+          representing {((biomassData[biomassData.length - 1].biomass - biomassData[0].biomass) / biomassData[0].biomass * 100).toFixed(1)}% growth.
+        </p>
+      )}
 
       {selectedForests.length > 0 && (
         <div style={styles.forestInfo}>
@@ -2655,14 +2664,6 @@ const ndviArray = rasters[0];  // Float32Array`}
               );
             })()}
 
-            <p style={{ fontSize: '12px', marginTop: '20px', padding: '10px', backgroundColor: '#f0f8ff', borderRadius: '4px' }}>
-              <strong>Processing Summary:</strong> {biomassData.length > 0 ?
-                `Analyzed ${biomassData.length} Sentinel-2 acquisitions over ${((new Date(biomassData[biomassData.length - 1].date) - new Date(biomassData[0].date)) / 31536000000).toFixed(1)} years 
-                with ${(biomassData.reduce((sum, d) => sum + parseFloat(d.coverage), 0) / biomassData.length).toFixed(1)}% average cloud-free coverage. 
-                Biomass increased from ${biomassData[0].biomass.toFixed(1)} to ${biomassData[biomassData.length - 1].biomass.toFixed(1)} tons/ha, 
-                representing ${((biomassData[biomassData.length - 1].biomass - biomassData[0].biomass) / biomassData[0].biomass * 100).toFixed(1)}% growth.` :
-                'No analysis data available. Complete satellite data processing to view results.'}
-            </p>
           </div>
         </div>
       )}
