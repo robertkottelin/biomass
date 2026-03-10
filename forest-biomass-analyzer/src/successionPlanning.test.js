@@ -93,28 +93,34 @@ describe('projectManagementScenarios', () => {
 });
 
 describe('generateAssetSummary', () => {
-  test('sums all asset components', () => {
+  test('uses land + max(timber, carbon) when timber is higher', () => {
     const result = generateAssetSummary(100000, 50000, 20000, 10);
-    expect(result.totalValue).toBe(170000);
+    expect(result.totalValue).toBe(150000); // 50k land + 100k timber
+    expect(result.betterUse).toBe('timber');
+  });
+
+  test('uses carbon when higher than timber', () => {
+    const result = generateAssetSummary(30000, 50000, 80000, 10);
+    expect(result.totalValue).toBe(130000); // 50k land + 80k carbon
+    expect(result.betterUse).toBe('carbon');
   });
 
   test('per hectare calculation is correct', () => {
     const result = generateAssetSummary(100000, 50000, 20000, 10);
-    expect(result.perHectare).toBe(17000);
+    expect(result.perHectare).toBe(15000);
   });
 
   test('breakdown percentages sum to ~100', () => {
     const result = generateAssetSummary(100000, 50000, 20000, 10);
-    const total = parseFloat(result.breakdown.timberPercent) +
-      parseFloat(result.breakdown.landPercent) +
-      parseFloat(result.breakdown.carbonPercent);
+    const total = parseFloat(result.breakdown.landPercent) +
+      parseFloat(result.breakdown.forestUsePercent);
     expect(total).toBeCloseTo(100, 0);
   });
 
   test('handles null carbon credit value', () => {
     const result = generateAssetSummary(100000, 50000, null, 10);
     expect(result.carbonCreditValue).toBe(0);
-    expect(result.totalValue).toBe(150000);
+    expect(result.totalValue).toBe(150000); // land + timber
   });
 
   test('handles zero area', () => {

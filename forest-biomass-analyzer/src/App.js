@@ -2568,7 +2568,7 @@ const ndviArray = rasters[0];  // Float32Array`}
                         <div style={{ fontSize: '11px', color: '#5b3a8c', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
                           Total Asset Value
                           <InfoButton id="succAsset" showInfo={showInfo} setShowInfo={setShowInfo}>
-                            Total estate value = standing timber + land value + theoretical carbon credits. Land value uses Southern Finland average (€{LAND_VALUE_PER_HA.south}/ha, Tax Authority 2024). Timber from current biomass estimate. Carbon credits at EU ETS price (theoretical — requires certification).
+                            Total estate value = land + forest use value. Timber and carbon credits are mutually exclusive — you either harvest (timber) or keep standing (carbon credits), so the higher of the two is used. Land value uses Southern Finland average (€{LAND_VALUE_PER_HA.south}/ha, Tax Authority 2024).
                           </InfoButton>
                         </div>
                         <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#5b3a8c', margin: '6px 0' }}>
@@ -2576,7 +2576,10 @@ const ndviArray = rasters[0];  // Float32Array`}
                         </div>
                         <div style={{ fontSize: '11px', color: '#888' }}>€{assetSummary.perHectare.toLocaleString()}/ha</div>
                         <div style={{ fontSize: '10px', color: '#aaa', marginTop: '4px' }}>
-                          Timber {assetSummary.breakdown.timberPercent}% / Land {assetSummary.breakdown.landPercent}% / Carbon {assetSummary.breakdown.carbonPercent}%
+                          Land {assetSummary.breakdown.landPercent}% / {assetSummary.betterUse === 'timber' ? 'Timber' : 'Carbon'} {assetSummary.breakdown.forestUsePercent}%
+                        </div>
+                        <div style={{ fontSize: '10px', color: '#aaa' }}>
+                          Timber €{assetSummary.timberValue.toLocaleString()} vs Carbon €{assetSummary.carbonCreditValue.toLocaleString()}
                         </div>
                       </div>
 

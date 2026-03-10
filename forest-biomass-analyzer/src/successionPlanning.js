@@ -113,19 +113,24 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
  * Generate total asset summary for estate planning.
  */
 export function generateAssetSummary(timberValue, landValue, carbonCreditValue, areaHectares) {
-  const totalValue = timberValue + landValue + (carbonCreditValue || 0);
+  const carbon = carbonCreditValue || 0;
+  // Timber and carbon are mutually exclusive — you harvest OR keep standing for credits
+  const forestUseValue = Math.max(timberValue, carbon);
+  const totalValue = forestUseValue + landValue;
+  const betterUse = timberValue >= carbon ? 'timber' : 'carbon';
 
   return {
     timberValue: Math.round(timberValue),
     landValue: Math.round(landValue),
-    carbonCreditValue: Math.round(carbonCreditValue || 0),
+    carbonCreditValue: Math.round(carbon),
+    forestUseValue: Math.round(forestUseValue),
     totalValue: Math.round(totalValue),
     perHectare: areaHectares > 0 ? Math.round(totalValue / areaHectares) : 0,
     areaHectares,
+    betterUse,
     breakdown: {
-      timberPercent: totalValue > 0 ? ((timberValue / totalValue) * 100).toFixed(1) : '0',
       landPercent: totalValue > 0 ? ((landValue / totalValue) * 100).toFixed(1) : '0',
-      carbonPercent: totalValue > 0 ? (((carbonCreditValue || 0) / totalValue) * 100).toFixed(1) : '0'
+      forestUsePercent: totalValue > 0 ? ((forestUseValue / totalValue) * 100).toFixed(1) : '0'
     }
   };
 }
