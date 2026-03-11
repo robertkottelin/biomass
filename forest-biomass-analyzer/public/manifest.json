@@ -1,6 +1,6 @@
 {
-  "short_name": "Biomass Sat-An",
-  "name": "Forest Biomass Sentinel-2 Satellite Analyzer",
+  "short_name": "MetsaData",
+  "name": "MetsaData",
   "icons": [
     {
       "src": "favicon.ico",
