@@ -1,0 +1,15 @@
+{
+  "name": "biomass-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev:server",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd forest-biomass-analyzer && npm start",
+    "build": "cd forest-biomass-analyzer && npm run build",
+    "start": "cd server && npm start",
+    "migrate": "cd server && npm run migrate",
+    "setup": "cd server && npm install && cd ../forest-biomass-analyzer && npm install",
+    "test": "cd forest-biomass-analyzer && npx react-scripts test --watchAll=false"
+  }
+}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { MapContainer, TileLayer, FeatureGroup, Polygon, useMap } from 'react-leaflet';
 import { Line, LineChart, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { estimateTreeCount } from './treeEstimation';
@@ -11,6 +12,11 @@ import { assessDeforestationRisk, generateComplianceReport } from './eudrComplia
 import { assessMetsoEligibility, estimateMetsoCompensation, assessNRLCompliance, compareProtectionVsHarvest } from './regulatoryCompliance';
 import { calculateInheritanceTax, projectManagementScenarios, generateAssetSummary, estimateManagementWorkload, LAND_VALUE_PER_HA } from './successionPlanning';
 import { estimateTimberValue, biomassToCarbon, estimateCarbonCreditValue, EU_ETS_PRICE_PER_TON, BASIC_DENSITY } from './carbonCalculation';
+import { useAuth } from './AuthContext';
+import LandingPage from './LandingPage';
+import Login from './Login';
+import UpgradeBanner from './UpgradeBanner';
+import api from './api';
 import 'leaflet/dist/leaflet.css';
 
 // Fix Leaflet icon issue
@@ -154,6 +160,8 @@ const InfoButton = ({ id, showInfo, setShowInfo, children }) => (
 );
 
 const ForestBiomassApp = () => {
+  const { user } = useAuth();
+  const isDemo = !user || user.plan === 'free';
   const [selectedForests, setSelectedForests] = useState([]);
   const [forestType, setForestType] = useState('pine');
   const [forestAge, setForestAge] = useState(20);
@@ -161,13 +169,7 @@ const ForestBiomassApp = () => {
   const [selectedForestIndex, setSelectedForestIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [authenticated, setAuthenticated] = useState(false);
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
   const [processingStatus, setProcessingStatus] = useState('');
-  const [accessToken, setAccessToken] = useState('');
-  const [tokenExpiry, setTokenExpiry] = useState(null);
-  const [manualAuthMode, setManualAuthMode] = useState(false);
   const mapRef = useRef();
   const [showInstructions, setShowInstructions] = useState(false);
   const [showDocumentation, setShowDocumentation] = useState(false);
@@ -176,171 +178,12 @@ const ForestBiomassApp = () => {
   const [biodiversityEstimate, setBiodiversityEstimate] = useState(null);
   const [showInfo, setShowInfo] = useState({});
 
-
-
   // Load GeometryUtil and GeoTIFF on mount
   useEffect(() => {
     Promise.all([loadGeometryUtil(), loadGeoTIFF()]).then(() => {
       // Libraries loaded
     });
   }, []);
-
-  // Check token expiry
-  useEffect(() => {
-    if (tokenExpiry && Date.now() > tokenExpiry) {
-      setAuthenticated(false);
-      setAccessToken('');
-      setTokenExpiry(null);
-      setError('Authentication token expired. Please re-authenticate.');
-    }
-  }, [tokenExpiry]);
-
-  // Authenticate with Copernicus Data Space
-  const authenticateCDSE = async () => {
-    if (!clientId || !clientSecret) {
-      setError('Client ID and Client Secret required');
-      return false;
-    }
-
-    setError(null);
-    setProcessingStatus('Authenticating...');
-
-    try {
-      // Format body as URLSearchParams to ensure proper encoding
-      const tokenData = new URLSearchParams();
-      tokenData.append('client_id', clientId);
-      tokenData.append('client_secret', clientSecret);
-      tokenData.append('grant_type', 'client_credentials');
-
-      // Copernicus Data Space authentication endpoint
-      const tokenResponse = await fetch('/api/auth/auth/realms/CDSE/protocol/openid-connect/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8'
-        },
-        body: tokenData.toString()
-      });
-
-      const responseText = await tokenResponse.text();
-
-      if (!tokenResponse.ok) {
-        // Parse error details if available
-        try {
-          const errorData = JSON.parse(responseText);
-          if (errorData.error_description) {
-            throw new Error(`${errorData.error}: ${errorData.error_description}`);
-          }
-        } catch (e) {
-          // If not JSON, use raw response
-        }
-
-        throw new Error(`Authentication failed: ${tokenResponse.status} - ${responseText}`);
-      }
-
-      const tokenResult = JSON.parse(responseText);
-
-      if (!tokenResult.access_token) {
-        throw new Error('No access token received');
-      }
-
-      setAccessToken(tokenResult.access_token);
-      setTokenExpiry(Date.now() + ((tokenResult.expires_in - 60) * 1000));
-      setAuthenticated(true);
-      setProcessingStatus('');
-
-      return true;
-    } catch (err) {
-      setError(`Authentication failed: ${err.message}. Use manual token mode if CORS is blocking.`);
-      setProcessingStatus('');
-      return false;
-    }
-  };
-
-  // Test API access with Process API
-  const testAPIAccess = async () => {
-    if (!accessToken) {
-      setError('Please authenticate first');
-      return;
-    }
-
-    setError(null);
-    setProcessingStatus('Testing API access...');
-
-    try {
-      // Test with Process API - FIXED evalscript without units specification
-      const testRequest = {
-        input: {
-          bounds: {
-            bbox: [24.0, 61.0, 24.1, 61.1], // Small area in Finland (WGS84)
-            properties: {
-              crs: "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
-            }
-          },
-          data: [{
-            type: "sentinel-2-l2a",
-            dataFilter: {
-              timeRange: {
-                from: "2024-07-01T00:00:00Z",
-                to: "2024-07-15T00:00:00Z"
-              }
-            }
-          }]
-        },
-        output: {
-          width: 10,
-          height: 10,
-          responses: [{
-            identifier: "default",
-            format: {
-              type: "image/png"
-            }
-          }]
-        },
-        evalscript: `//VERSION=3
-function setup() {
-  return {
-    input: ["B02", "B03", "B04"],
-    output: { bands: 3 }
-  };
-}
-function evaluatePixel(sample) {
-  return [sample.B04, sample.B03, sample.B02];
-}`
-      };
-
-      const response = await fetch('/api/copernicus/api/v1/process', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'image/png'
-        },
-        body: JSON.stringify(testRequest)
-      });
-
-      if (response.ok) {
-        setProcessingStatus('');
-        setError(null);
-        alert('Process API test successful! The API is accessible with your credentials.');
-      } else {
-        const responseText = await response.text();
-        setProcessingStatus('');
-        let errorMsg = `Process API test failed: ${response.status}`;
-        try {
-          const errorData = JSON.parse(responseText);
-          if (errorData.error) {
-            errorMsg += ` - ${errorData.error.message || errorData.error}`;
-          }
-        } catch (e) {
-          errorMsg += ` - ${responseText}`;
-        }
-        setError(errorMsg);
-      }
-    } catch (err) {
-      setProcessingStatus('');
-      setError(`Test failed: ${err.message}`);
-    }
-  };
 
   // Fetch NDVI data using Process API - FIXED VERSION with GeoTIFF.js
   const fetchNDVIData = async (polygon, dateFrom, dateTo) => {
@@ -464,20 +307,10 @@ function evaluatePixel(sample) {
     };
 
     try {
-      const response = await fetch('/api/copernicus/api/v1/process', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'image/tiff'
-        },
-        body: JSON.stringify(processRequest)
+      const response = await api.postRaw('/api/sentinel/process', JSON.stringify(processRequest), {
+        'Content-Type': 'application/json',
+        'Accept': 'image/tiff'
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Process API error: ${response.status} - ${errorText}`);
-      }
 
       // Parse TIFF response using GeoTIFF.js
       const arrayBuffer = await response.arrayBuffer();
@@ -562,20 +395,7 @@ function evaluatePixel(sample) {
     };
 
     try {
-      const response = await fetch('/api/copernicus/api/v1/catalog/1.0.0/search', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`
-        },
-        body: JSON.stringify(catalogRequest)
-      });
-
-      if (!response.ok) {
-        throw new Error(`Catalog API error: ${response.status}`);
-      }
-
-      const data = await response.json();
+      const data = await api.post('/api/sentinel/catalog', catalogRequest);
 
       // Extract unique dates from features
       const dates = new Set();
@@ -592,6 +412,55 @@ function evaluatePixel(sample) {
     }
   };
 
+  // Load demo data for free tier users
+  const loadDemoData = async () => {
+    setLoading(true);
+    setError(null);
+    setProcessingStatus('Loading demo data...');
+    try {
+      const data = await api.get('/api/sample-data/forest');
+      const demo = data;
+
+      // Set forest from demo data
+      setSelectedForests([{
+        id: Date.now(),
+        coords: demo.forest.polygon.coordinates[0].map(c => [c[1], c[0]]),
+        area: demo.forest.area_hectares.toFixed(2),
+        type: demo.forest.type
+      }]);
+      setSelectedForestIndex(0);
+      setForestType(demo.forest.type);
+      setForestAge(demo.forest.age);
+
+      // Process demo biomass data
+      let results = demo.biomassData;
+      let withRolling = calculateRollingAverage(results, 'biomass', 7);
+      withRolling = calculateRollingAverage(withRolling, 'ndvi', 7);
+      withRolling = calculateRollingAverage(withRolling, 'ndmi', 7);
+      const finalResults = calculateRollingAverage(withRolling, 'ndre', 7);
+      setBiomassData(finalResults);
+
+      // Run analysis modules on demo data
+      const latestResult = finalResults[finalResults.length - 1];
+      const latestNdviValues = finalResults.slice(-5).map(d => d.ndvi);
+
+      const treeEst = estimateTreeCount(latestNdviValues, demo.forest.type, latestResult.forestAge, demo.forest.area_hectares);
+      setTreeEstimate(treeEst);
+
+      const healthResult = analyzeForestHealth(finalResults, demo.forest.type, demo.forest.age);
+      setHealthEstimate(healthResult);
+
+      const bioEst = estimateBiodiversity(finalResults, treeEst, healthResult, demo.forest.type, demo.forest.age, demo.forest.area_hectares);
+      setBiodiversityEstimate(bioEst);
+      setProcessingStatus('');
+    } catch (err) {
+      setError(`Failed to load demo data: ${err.message}`);
+    } finally {
+      setLoading(false);
+      setProcessingStatus('');
+    }
+  };
+
   // Process satellite data using Process API with daily acquisitions
   const fetchSatelliteData = async () => {
     if (selectedForests.length === 0) {
@@ -599,8 +468,8 @@ function evaluatePixel(sample) {
       return;
     }
 
-    if (!authenticated) {
-      setError('Authenticate first or use manual token');
+    if (isDemo) {
+      setError('Upgrade to Pro to analyze your own forests with real satellite data.');
       return;
     }
 
@@ -1094,6 +963,8 @@ function evaluatePixel(sample) {
     <div style={styles.container}>
       <h1 style={styles.header}>Sentinel-2 Forest Monitoring - NDVI Time Series & Biomass Analysis</h1>
 
+      {isDemo && <UpgradeBanner plan={user ? user.plan : null} />}
+
       {/* User Instructions Panel */}
       <div style={{
         ...styles.authSection,
@@ -1505,101 +1376,6 @@ const ndviArray = rasters[0];  // Float32Array`}
         </div>
       )}
 
-      <div style={styles.authSection}>
-        <h3>Authentication</h3>
-        <div style={{ marginBottom: '10px' }}>
-          <label>
-            <input
-              type="checkbox"
-              style={styles.checkbox}
-              checked={manualAuthMode}
-              onChange={(e) => setManualAuthMode(e.target.checked)}
-            />
-            Use manual token mode (if CORS blocks direct auth)
-          </label>
-        </div>
-
-        {!manualAuthMode ? (
-          <div style={styles.controls}>
-            <div>
-              <label style={styles.label}>Client ID</label>
-              <input
-                style={styles.input}
-                type="text"
-                placeholder="OAuth2 Client ID"
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                disabled={authenticated}
-              />
-            </div>
-            <div>
-              <label style={styles.label}>Client Secret</label>
-              <input
-                style={styles.input}
-                type="password"
-                placeholder="OAuth2 Client Secret"
-                value={clientSecret}
-                onChange={(e) => setClientSecret(e.target.value)}
-                disabled={authenticated}
-              />
-            </div>
-          </div>
-        ) : (
-          <div>
-            <label style={styles.label}>Access Token (get from Copernicus Data Space)</label>
-            <input
-              style={styles.input}
-              type="text"
-              placeholder="Paste your access token here"
-              onChange={(e) => {
-                if (e.target.value) {
-                  setAccessToken(e.target.value);
-                  setTokenExpiry(Date.now() + (540 * 1000)); // 9 minutes
-                  setAuthenticated(true);
-                  setError(null);
-                }
-              }}
-              disabled={authenticated}
-            />
-            <p style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
-              Get token from: https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token
-            </p>
-          </div>
-        )}
-
-        {!manualAuthMode && (
-          <button
-            style={{
-              ...styles.button,
-              ...(authenticated ? styles.buttonDisabled : {})
-            }}
-            onClick={authenticateCDSE}
-            disabled={authenticated}
-          >
-            {authenticated ? 'Authenticated' : 'Authenticate'}
-          </button>
-        )}
-
-        {authenticated && (
-          <>
-            <p style={{ color: '#28a745', marginTop: '10px' }}>
-              ✓ Authenticated successfully
-            </p>
-            <button
-              style={{
-                ...styles.button,
-                backgroundColor: '#17a2b8',
-                marginTop: '10px',
-                marginRight: '10px'
-              }}
-              onClick={testAPIAccess}
-            >
-              Test Process API Access
-            </button>
-          </>
-        )}
-      </div>
-
       <div style={styles.controls}>
         <div>
           <label style={styles.label}>Forest Type</label>
@@ -1669,12 +1445,12 @@ const ndviArray = rasters[0];  // Float32Array`}
       <button
         style={{
           ...styles.button,
-          ...(loading || selectedForests.length === 0 || !authenticated ? styles.buttonDisabled : {})
+          ...(loading || selectedForests.length === 0 ? styles.buttonDisabled : {})
         }}
-        onClick={fetchSatelliteData}
-        disabled={loading || selectedForests.length === 0 || !authenticated}
+        onClick={isDemo ? loadDemoData : fetchSatelliteData}
+        disabled={loading || (selectedForests.length === 0 && !isDemo)}
       >
-        {loading ? 'Processing Satellite Data...' : 'Analyze with Sentinel-2 Process API'}
+        {loading ? 'Processing Satellite Data...' : isDemo ? 'Load Demo Analysis' : 'Analyze with Sentinel-2 Process API'}
       </button>
 
       {!loading && biomassData.length > 0 && (
@@ -2682,4 +2458,25 @@ const ndviArray = rasters[0];  // Float32Array`}
   );
 };
 
-export default ForestBiomassApp;
+const App = () => {
+  const { loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  return (
+    <Routes>
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/app" element={<ForestBiomassApp />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+};
+
+export default App;

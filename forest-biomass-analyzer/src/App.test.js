@@ -2,6 +2,17 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import App from './App';
 
+// Mock react-router-dom (ESM module not compatible with Jest CJS)
+jest.mock('react-router-dom', () => ({
+  BrowserRouter: ({ children }) => <div>{children}</div>,
+  Routes: ({ children }) => <div>{children}</div>,
+  Route: ({ element }) => element || <div />,
+  Navigate: () => <div />,
+  useNavigate: () => jest.fn(),
+  useLocation: () => ({ pathname: '/' }),
+  Link: ({ children, to }) => <a href={to}>{children}</a>,
+}));
+
 // Mock leaflet and react-leaflet since they require DOM/canvas
 jest.mock('react-leaflet', () => ({
   MapContainer: ({ children }) => <div data-testid="map-container">{children}</div>,
@@ -32,12 +43,38 @@ jest.mock('leaflet', () => {
 jest.mock('recharts', () => ({
   Line: () => <div />,
   LineChart: ({ children }) => <div>{children}</div>,
+  BarChart: ({ children }) => <div>{children}</div>,
+  Bar: () => <div />,
+  Cell: () => <div />,
   XAxis: () => <div />,
   YAxis: () => <div />,
   CartesianGrid: () => <div />,
   Tooltip: () => <div />,
   Legend: () => <div />,
   ResponsiveContainer: ({ children }) => <div>{children}</div>,
+  ReferenceLine: () => <div />,
+}));
+
+// Mock AuthContext
+jest.mock('./AuthContext', () => ({
+  useAuth: () => ({
+    user: null,
+    loading: false,
+    login: jest.fn(),
+    register: jest.fn(),
+    logout: jest.fn(),
+  }),
+  AuthProvider: ({ children }) => <div>{children}</div>,
+}));
+
+// Mock api
+jest.mock('./api', () => ({
+  __esModule: true,
+  default: {
+    get: jest.fn(() => Promise.resolve({})),
+    post: jest.fn(() => Promise.resolve({})),
+    postRaw: jest.fn(() => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)) })),
+  },
 }));
 
 describe('App Component', () => {
@@ -45,27 +82,8 @@ describe('App Component', () => {
     render(<App />);
   });
 
-  it('renders authentication form with inputs', () => {
+  it('renders landing page content', () => {
     render(<App />);
-    // Should have client ID and client secret inputs
-    const inputs = screen.getAllByRole('textbox');
-    expect(inputs.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('renders the map container', () => {
-    render(<App />);
-    expect(screen.getByTestId('map-container')).toBeInTheDocument();
-  });
-
-  it('renders forest type selector with all 4 species', () => {
-    render(<App />);
-    const select = screen.getByRole('combobox');
-    expect(select).toBeInTheDocument();
-    const options = screen.getAllByRole('option');
-    const optionTexts = options.map(o => o.textContent.toLowerCase());
-    expect(optionTexts.some(t => t.includes('pine'))).toBe(true);
-    expect(optionTexts.some(t => t.includes('fir') || t.includes('spruce'))).toBe(true);
-    expect(optionTexts.some(t => t.includes('birch'))).toBe(true);
-    expect(optionTexts.some(t => t.includes('aspen'))).toBe(true);
+    expect(screen.getByText(/Satellite-Powered Forest Analytics/i)).toBeInTheDocument();
   });
 });
