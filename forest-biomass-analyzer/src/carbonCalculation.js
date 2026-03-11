@@ -241,6 +241,75 @@ export function findOptimalHarvest(forestType, areaHectares, options = {}) {
   };
 }
 
+export function findOptimalHarvestYear(forestType, currentAge, currentBiomass, areaHectares, options = {}) {
+  const type = (forestType && forestParams[forestType]) ? forestType : 'pine';
+  const params = forestParams[type];
+  const discountRate = options.discountRate || FORESTRY_DISCOUNT_RATE;
+  const regenCostPerHa = REGENERATION_COST[type] || REGENERATION_COST.pine;
+  const regenCost = regenCostPerHa * areaHectares;
+  const minAge = MIN_HARVEST_AGE[type] || MIN_HARVEST_AGE.pine;
+
+  // Faustmann-optimal rotation for second generation (bare-land start)
+  const faustmann = findOptimalHarvest(type, areaHectares, options);
+  const rotationAge = faustmann.optimalAge;
+  const secondGenValue = faustmann.valueAtHarvest;
+
+  // Anchor to real satellite data via scale factor
+  const theoreticalBiomass = estimateBiomass(params.ndviSaturation, type, 0, currentAge);
+  const biomassScaleFactor = (currentAge >= 10 && theoreticalBiomass > 0)
+    ? currentBiomass / theoreticalBiomass
+    : 1;
+
+  // Projected timber value at a given age, scaled by satellite data
+  const valueAt = (age) => {
+    const biomass = estimateBiomass(params.ndviSaturation, type, 0, age) * biomassScaleFactor;
+    return estimateTimberValue(biomass, type, age, areaHectares).totalValue;
+  };
+
+  const currentValue = estimateTimberValue(currentBiomass, type, currentAge, areaHectares).totalValue;
+
+  // Two-generation NPV: find first-harvest age T that maximizes
+  // NPV(T) = [V_scaled(T) - C] / (1+r)^(T-now) + [V(R) - C] / (1+r)^(T-now+R)
+  const startAge = Math.max(minAge, currentAge);
+  const maxCandidateAge = currentAge + 40;
+  let bestT = startAge;
+  let bestNPV = -Infinity;
+
+  for (let T = startAge; T <= maxCandidateAge; T++) {
+    const yearsUntilT = T - currentAge;
+    const discountFirst = Math.pow(1 + discountRate, yearsUntilT);
+    const discountSecond = Math.pow(1 + discountRate, yearsUntilT + rotationAge);
+
+    const npv = (valueAt(T) - regenCost) / discountFirst
+              + (secondGenValue - regenCost) / discountSecond;
+
+    if (npv > bestNPV) {
+      bestNPV = npv;
+      bestT = T;
+    }
+  }
+
+  const harvestYear = bestT;
+  const yearsFromNow = harvestYear - currentAge;
+  const annualGrowthRate = currentValue > 0
+    ? (valueAt(currentAge + 1) - currentValue) / currentValue : 0;
+
+  let recommendation;
+  if (yearsFromNow <= 0) {
+    recommendation = 'Harvest now — two-generation NPV is maximized at current age';
+  } else if (yearsFromNow <= 3) {
+    recommendation = `Harvest within ${yearsFromNow} year${yearsFromNow > 1 ? 's' : ''} (age ${harvestYear})`;
+  } else {
+    recommendation = `Wait ${yearsFromNow} years (age ${harvestYear})`;
+  }
+
+  return {
+    harvestYear, yearsFromNow, currentValue,
+    valueAtHarvest: valueAt(harvestYear),
+    annualGrowthRate, rotationAge, recommendation, biomassScaleFactor,
+  };
+}
+
 export function projectHarvestCycle(forestType, areaHectares, totalYears = 100) {
   const type = (forestType && forestParams[forestType]) ? forestType : 'pine';
   const optimal = findOptimalHarvest(type, areaHectares);

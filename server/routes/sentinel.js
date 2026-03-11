@@ -65,15 +65,31 @@ router.post('/process', sentinelLimiter, async (req, res, next) => {
     const userId = req.user ? req.user.id : '-';
     logger.debug('Sentinel process request', { userId });
 
-    const response = await fetch(PROCESS_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        Accept: req.headers.accept || 'application/octet-stream',
-      },
-      body: JSON.stringify(req.body),
-    });
+    const bodyStr = JSON.stringify(req.body);
+    const maxRetries = 3;
+    let response;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      response = await fetch(PROCESS_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          Accept: req.headers.accept || 'application/octet-stream',
+        },
+        body: bodyStr,
+      });
+
+      if (response.status !== 429 || attempt === maxRetries) break;
+
+      // Respect Retry-After header, fallback to exponential backoff
+      const retryAfter = response.headers.get('retry-after');
+      const waitMs = retryAfter
+        ? parseInt(retryAfter, 10) * 1000
+        : Math.min(1000 * Math.pow(2, attempt), 8000);
+      logger.info('Sentinel 429, retrying', { attempt: attempt + 1, waitMs, userId });
+      await new Promise(r => setTimeout(r, waitMs));
+    }
 
     if (!response.ok) {
       const text = await response.text();
@@ -102,15 +118,29 @@ router.post('/process', sentinelLimiter, async (req, res, next) => {
 router.post('/catalog', async (req, res, next) => {
   try {
     const token = await getAccessToken();
+    const bodyStr = JSON.stringify(req.body);
+    const maxRetries = 3;
+    let response;
 
-    const response = await fetch(CATALOG_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(req.body),
-    });
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      response = await fetch(CATALOG_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: bodyStr,
+      });
+
+      if (response.status !== 429 || attempt === maxRetries) break;
+
+      const retryAfter = response.headers.get('retry-after');
+      const waitMs = retryAfter
+        ? parseInt(retryAfter, 10) * 1000
+        : Math.min(1000 * Math.pow(2, attempt), 8000);
+      logger.info('Sentinel catalog 429, retrying', { attempt: attempt + 1, waitMs });
+      await new Promise(r => setTimeout(r, waitMs));
+    }
 
     if (!response.ok) {
       const text = await response.text();

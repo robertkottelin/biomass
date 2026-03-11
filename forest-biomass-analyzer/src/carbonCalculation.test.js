@@ -6,6 +6,7 @@ import {
   estimateTimberValue,
   projectForestValue,
   findOptimalHarvest,
+  findOptimalHarvestYear,
   projectHarvestCycle,
   estimateCarbonCreditValue,
   EU_ETS_PRICE_PER_TON,
@@ -446,5 +447,75 @@ describe('projectHarvestCycle', () => {
     const result = projectHarvestCycle('oak', 5, 100);
     const pineResult = projectHarvestCycle('pine', 5, 100);
     expect(result.cycleLength).toBe(pineResult.cycleLength);
+  });
+});
+
+describe('findOptimalHarvestYear', () => {
+  test('old forest recommends harvest soon', () => {
+    const result = findOptimalHarvestYear('pine', 75, 180, 5);
+    expect(result.yearsFromNow).toBeGreaterThanOrEqual(0);
+    expect(result.yearsFromNow).toBeLessThanOrEqual(5);
+  });
+
+  test('young forest recommends waiting', () => {
+    const result = findOptimalHarvestYear('pine', 30, 80, 5);
+    expect(result.yearsFromNow).toBeGreaterThanOrEqual(25);
+    expect(result.harvestYear).toBeGreaterThanOrEqual(60); // MIN_HARVEST_AGE.pine
+  });
+
+  test('forest at rotation age recommends harvest within 0-10 years', () => {
+    const result = findOptimalHarvestYear('pine', 60, 150, 5);
+    expect(result.yearsFromNow).toBeGreaterThanOrEqual(0);
+    expect(result.yearsFromNow).toBeLessThanOrEqual(10);
+  });
+
+  test('all species work', () => {
+    ['pine', 'fir', 'birch', 'aspen'].forEach(type => {
+      const result = findOptimalHarvestYear(type, 70, 150, 5);
+      expect(result.yearsFromNow).toBeGreaterThanOrEqual(0);
+      expect(result.harvestYear).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  test('return shape has all expected fields', () => {
+    const result = findOptimalHarvestYear('pine', 50, 120, 5);
+    expect(result).toHaveProperty('harvestYear');
+    expect(result).toHaveProperty('yearsFromNow');
+    expect(result).toHaveProperty('currentValue');
+    expect(result).toHaveProperty('valueAtHarvest');
+    expect(result).toHaveProperty('annualGrowthRate');
+    expect(result).toHaveProperty('rotationAge');
+    expect(result).toHaveProperty('recommendation');
+    expect(result).toHaveProperty('biomassScaleFactor');
+  });
+
+  test('recommendation says "now" for old forests', () => {
+    const result = findOptimalHarvestYear('pine', 75, 180, 5);
+    expect(result.recommendation.toLowerCase()).toMatch(/harvest (now|within)/);
+  });
+
+  test('recommendation says "Wait" for young forests', () => {
+    const result = findOptimalHarvestYear('pine', 30, 80, 5);
+    expect(result.recommendation).toMatch(/^Wait/);
+  });
+
+  test('higher biomass yields higher value at harvest', () => {
+    const normal = findOptimalHarvestYear('pine', 60, 150, 5);
+    const high = findOptimalHarvestYear('pine', 60, 180, 5);
+    expect(high.valueAtHarvest).toBeGreaterThan(normal.valueAtHarvest);
+  });
+
+  test('harvest year never below minimum age', () => {
+    ['pine', 'fir', 'birch', 'aspen'].forEach(type => {
+      const result = findOptimalHarvestYear(type, 40, 100, 5);
+      const minAge = type === 'aspen' ? 35 : type === 'birch' ? 50 : 60;
+      expect(result.harvestYear).toBeGreaterThanOrEqual(minAge);
+    });
+  });
+
+  test('mid-age forest finds sensible harvest age', () => {
+    const result = findOptimalHarvestYear('pine', 50, 120, 5);
+    expect(result.harvestYear).toBeGreaterThanOrEqual(60); // MIN_HARVEST_AGE.pine
+    expect(result.harvestYear).toBeLessThanOrEqual(90);
   });
 });

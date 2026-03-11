@@ -1,7 +1,7 @@
 // Forest succession & generational transfer planner
 // Finnish inheritance tax and forest estate valuation
 
-import { estimateTimberValue, estimateCarbonCreditValue, biomassToCarbon, FORESTRY_DISCOUNT_RATE } from './carbonCalculation';
+import { estimateTimberValue, estimateCarbonCreditValue, biomassToCarbon, FORESTRY_DISCOUNT_RATE, findOptimalHarvestYear } from './carbonCalculation';
 import { forestParams, estimateBiomass } from './dataProcessing';
 
 // Finnish inheritance tax Class I (children, spouse) progressive rates
@@ -83,7 +83,9 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
   const sellInvest = [];
 
   let activeCumulativeHarvest = 0;
-  const optimalAge = type === 'pine' || type === 'fir' ? 70 : type === 'birch' ? 55 : 40;
+  const harvestRec = findOptimalHarvestYear(type, forestAge, currentBiomass, areaHectares);
+  const firstHarvestAge = harvestRec.harvestYear;
+  const rotationAge = harvestRec.rotationAge;
 
   for (let y = 0; y <= years; y++) {
     const age = forestAge + y;
@@ -93,15 +95,21 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
     const holdTimber = estimateTimberValue(holdBiomass, type, age, areaHectares);
     hold.push({ year: y, age, value: holdTimber.totalValue });
 
-    // Active scenario: harvest at optimal age, replant
-    const activeAgeInCycle = age >= optimalAge ? (age - optimalAge) % optimalAge : age;
-    const isHarvestYear = age >= optimalAge && activeAgeInCycle === 0 && y > 0;
+    // Active scenario: first harvest at recommended age, then every rotationAge
+    let activeAgeInCycle;
+    if (age < firstHarvestAge) {
+      activeAgeInCycle = age;
+    } else {
+      activeAgeInCycle = rotationAge > 0 ? (age - firstHarvestAge) % rotationAge : 0;
+    }
+    const isHarvestYear = y > 0 && ((age === firstHarvestAge) || (age > firstHarvestAge && rotationAge > 0 && activeAgeInCycle === 0));
     if (isHarvestYear) {
-      const harvestBiomass = estimateBiomass(params.ndviSaturation, type, 0, optimalAge);
-      const harvestTimber = estimateTimberValue(harvestBiomass, type, optimalAge, areaHectares);
+      const harvestAge = age === firstHarvestAge ? firstHarvestAge : rotationAge;
+      const harvestBiomass = estimateBiomass(params.ndviSaturation, type, 0, harvestAge);
+      const harvestTimber = estimateTimberValue(harvestBiomass, type, harvestAge, areaHectares);
       activeCumulativeHarvest += harvestTimber.totalValue;
     }
-    const activeEffectiveAge = isHarvestYear ? 0 : (activeAgeInCycle > 0 ? activeAgeInCycle : age);
+    const activeEffectiveAge = isHarvestYear ? 0 : (age < firstHarvestAge ? age : activeAgeInCycle);
     const activeBiomass = estimateBiomass(params.ndviSaturation, type, 0, activeEffectiveAge);
     const activeTimber = estimateTimberValue(activeBiomass, type, activeEffectiveAge, areaHectares);
     active.push({ year: y, age, value: activeTimber.totalValue + activeCumulativeHarvest });
@@ -112,7 +120,7 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
   }
 
   return {
-    active: { data: active, label: 'Active Management', description: `Harvest at ${optimalAge}yr, replant` },
+    active: { data: active, label: 'Active Management', description: `Harvest at age ${firstHarvestAge}, then every ${rotationAge}yr` },
     hold: { data: hold, label: 'Hold (No Harvest)', description: 'Let forest grow, no harvesting' },
     sellInvest: { data: sellInvest, label: 'Sell + Invest', description: `Sell now (€${currentTimber.totalValue.toFixed(0)}), invest at ${(marketReturn * 100)}%` }
   };

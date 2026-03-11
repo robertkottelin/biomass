@@ -4,6 +4,7 @@ import {
   estimateTimberValue,
   projectForestValue,
   findOptimalHarvest,
+  findOptimalHarvestYear,
   projectHarvestCycle,
   biomassToCarbon,
   projectCarbonStock,
@@ -57,11 +58,14 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
 
   const forestValueData = useMemo(() => {
     if (!biomassData || biomassData.length === 0) return null;
+    const latestBiomass = biomassData[biomassData.length - 1].biomassRollingAvg
+      ?? biomassData[biomassData.length - 1].biomass;
     const values = projectForestValue(forestType, areaHectares, 100);
     const optimal = findOptimalHarvest(forestType, areaHectares);
     const cycle = projectHarvestCycle(forestType, areaHectares, 100);
-    return { values, optimal, cycle };
-  }, [biomassData, forestType, areaHectares]);
+    const harvestRec = findOptimalHarvestYear(forestType, forestAge, latestBiomass, areaHectares);
+    return { values, optimal, cycle, harvestRec };
+  }, [biomassData, forestType, forestAge, areaHectares]);
 
   const valueChartData = useMemo(() => {
     if (!forestValueData) return [];
@@ -183,13 +187,13 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
         </div>
         <div style={cardStyle}>
           <div style={{ ...cardLabelStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>Optimal Harvest <InfoButton id="optimalHarvest" showInfo={showInfo} setShowInfo={setShowInfo}>
-            Optimal rotation age is calculated using the Faustmann formula (Land Expectation Value): LEV = (timber value at age T − regeneration cost) / (e<sup>r×T</sup> − 1), where r = 3% discount rate. LEV is maximized over ages above the species minimum harvest age (pine/fir 60yr, birch 50yr, aspen 35yr). Regeneration costs: pine €1500/ha, fir €1800/ha, birch €1200/ha, aspen €800/ha.
+            Uses two-generation NPV optimization: finds the first-harvest age that maximizes the discounted sum of (1) current stand timber value minus regeneration cost, plus (2) a second Faustmann-optimal rotation. Projections are anchored to satellite-derived biomass. Rotation age ({forestValueData ? forestValueData.harvestRec.rotationAge : '—'}yr) is the Faustmann-optimal cycle for replanting from bare land.
           </InfoButton></div>
           <div style={cardValueStyle}>
-            {forestValueData ? `${forestValueData.optimal.optimalAge} yr` : '—'}
+            {forestValueData ? (forestValueData.harvestRec.yearsFromNow === 0 ? 'Now' : `In ${forestValueData.harvestRec.yearsFromNow} yr`) : '—'}
           </div>
-          <div style={cardSubStyle}>€{forestValueData ? forestValueData.optimal.valueAtHarvest.toFixed(0) : '0'} at harvest</div>
-          <div style={cardSubStyle}>Current age: {forestAge} yr</div>
+          <div style={cardSubStyle}>Age {forestValueData ? forestValueData.harvestRec.harvestYear : '—'} · €{forestValueData ? forestValueData.harvestRec.valueAtHarvest.toFixed(0) : '0'}</div>
+          <div style={cardSubStyle}>Growth: {forestValueData ? (forestValueData.harvestRec.annualGrowthRate * 100).toFixed(1) : '0'}%/yr · Rotation: {forestValueData ? forestValueData.harvestRec.rotationAge : '—'}yr</div>
         </div>
       </div>
 
@@ -202,7 +206,7 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
           <p style={{ fontSize: '11px', color: '#666', margin: '0 0 10px 0' }}>
             Timber value from planting to 100 years.
             Current age: <strong>{forestAge}yr</strong>.
-            Optimal harvest age: <strong>{forestValueData.optimal.optimalAge}yr</strong> (€{forestValueData.optimal.valueAtHarvest.toFixed(0)}).
+            Recommended harvest: <strong>{forestValueData.harvestRec.recommendation}</strong>.
             Harvest cycle: cut every <strong>{forestValueData.cycle.cycleLength}yr</strong>, replant.
           </p>
           <ResponsiveContainer width="100%" height={300}>
@@ -225,7 +229,10 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
               {forestAge > 0 && forestAge <= 100 && (
                 <ReferenceLine x={forestAge} stroke="#3498db" strokeWidth={2} strokeDasharray="6 3" label={{ value: `Now (${forestAge}yr)`, position: 'top', fontSize: 10, fill: '#3498db' }} />
               )}
-              <ReferenceLine x={forestValueData.optimal.optimalAge} stroke="#c0392b" strokeWidth={1.5} strokeDasharray="4 4" label={{ value: `Optimal (${forestValueData.optimal.optimalAge}yr)`, position: 'insideTopRight', fontSize: 10, fill: '#c0392b' }} />
+              <ReferenceLine x={forestValueData.optimal.optimalAge} stroke="#c0392b" strokeWidth={1.5} strokeDasharray="4 4" label={{ value: `Rotation (${forestValueData.optimal.optimalAge}yr)`, position: 'insideTopRight', fontSize: 10, fill: '#c0392b' }} />
+              {forestValueData.harvestRec.harvestYear <= 100 && forestValueData.harvestRec.harvestYear !== forestValueData.optimal.optimalAge && (
+                <ReferenceLine x={forestValueData.harvestRec.harvestYear} stroke="#27ae60" strokeWidth={2} strokeDasharray="6 3" label={{ value: `Recommended (${forestValueData.harvestRec.harvestYear}yr)`, position: 'top', fontSize: 10, fill: '#27ae60' }} />
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>

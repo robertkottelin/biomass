@@ -231,6 +231,7 @@ export default function LandingPage() {
                 <li style={{ ...s.pricingFeature, color: 'rgba(255,255,255,0.95)' }}>{'\u2713'} Real Sentinel-2 satellite data</li>
                 <li style={{ ...s.pricingFeature, color: 'rgba(255,255,255,0.95)' }}>{'\u2713'} All analysis modules</li>
                 <li style={{ ...s.pricingFeature, color: 'rgba(255,255,255,0.95)' }}>{'\u2713'} Save up to 10 forests</li>
+                <li style={{ ...s.pricingFeature, color: 'rgba(255,255,255,0.95)' }}>{'\u2713'} 100 Sentinel requests/day</li>
               </ul>
               <button
                 style={s.pricingBtnPro}
@@ -251,6 +252,8 @@ export default function LandingPage() {
               <ul style={s.pricingFeatures}>
                 <li style={s.pricingFeature}>{'\u2713'} Everything in Pro</li>
                 <li style={s.pricingFeature}>{'\u2713'} Unlimited forests</li>
+                <li style={s.pricingFeature}>{'\u2713'} PDF report export</li>
+                <li style={s.pricingFeature}>{'\u2713'} 500 Sentinel requests/day</li>
               </ul>
               <button
                 style={s.pricingBtn}

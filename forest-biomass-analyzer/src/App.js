@@ -249,6 +249,14 @@ const ForestBiomassApp = () => {
         biomass_data_json: biomassData,
       });
 
+      // Update the current forest's name in state
+      setSelectedForests(prev => {
+        const updated = [...prev];
+        updated[selectedForestIndex] = { ...updated[selectedForestIndex], name };
+        return updated;
+      });
+      setLoadedForestId(result.forest.id);
+
       await fetchSavedForests();
       setShowSavedForests(true);
     } catch (err) {
@@ -273,6 +281,7 @@ const ForestBiomassApp = () => {
         coords,
         area: (forest.area_hectares || 0).toFixed(2),
         type: forest.forest_type,
+        name: forest.name,
       }]);
       setSelectedForestIndex(0);
       setForestType(forest.forest_type || 'pine');
@@ -1392,16 +1401,10 @@ const ForestBiomassApp = () => {
         
         {showInstructions && (
           <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
-            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>1. Authentication Setup</h4>
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>1. Getting Started</h4>
             <ul style={{ marginLeft: '20px' }}>
-              <li><strong>Option A - Direct OAuth2:</strong> Register at <a href="https://dataspace.copernicus.eu/" target="_blank" rel="noreferrer">Copernicus Data Space</a> → Create OAuth2 client → Enter Client ID & Secret → Click "Authenticate"</li>
-              <li><strong>Option B - Manual Token:</strong> If CORS blocks direct auth, enable "Use manual token mode" → Get token via POST request to:
-                <code style={{ display: 'block', margin: '5px 0', padding: '5px', backgroundColor: '#f5f5f5', fontSize: '12px' }}>
-                  https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token
-                </code>
-                with body: <code>grant_type=client_credentials&client_id=YOUR_ID&client_secret=YOUR_SECRET</code>
-              </li>
-              <li>Token expires in 10 minutes - re-authenticate as needed</li>
+              <li><strong>Free users:</strong> Click "Load Demo Analysis" to explore all analysis modules with a sample Finnish pine forest — no account required</li>
+              <li><strong>Pro & Business users:</strong> Log in to access real Sentinel-2 satellite data, draw your own forest polygons, and save your forests</li>
             </ul>
 
             <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>2. Drawing Forest Polygons</h4>
@@ -1409,15 +1412,16 @@ const ForestBiomassApp = () => {
               <li>Click the polygon tool (pentagon icon) in the map's top-left control panel</li>
               <li>Click on the map to place vertices of your forest boundary</li>
               <li>Complete the polygon by clicking the first vertex again</li>
-              <li>Draw multiple forests to compare - click each to select for analysis</li>
+              <li>Draw multiple forests to compare — click each to select for analysis</li>
               <li>Use the trash icon to delete all polygons and start over</li>
               <li><strong>Important:</strong> Draw polygons over actual forested areas visible in satellite imagery for accurate results</li>
             </ul>
 
             <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>3. Forest Parameters</h4>
             <ul style={{ marginLeft: '20px' }}>
-              <li><strong>Forest Type:</strong> Select species (Pine, Fir, Birch, Aspen) - affects growth curves and maximum biomass</li>
-              <li><strong>Forest Age:</strong> Current age of the forest as of today. The app automatically calculates the age at the start of the 10-year analysis period. (Example: if planted in 2000, enter 25 for year 2025)</li>
+              <li><strong>Forest Type:</strong> Select species (Pine, Fir, Birch, Aspen) — affects growth curves and maximum biomass</li>
+              <li><strong>Forest Age:</strong> Current age of the forest as of today. The app automatically calculates the age at the start of the 10-year analysis period</li>
+              <li><strong>Age Estimation:</strong> Enable "Estimate age from NDVI" to let the app estimate forest age from the satellite data trend</li>
               <li><strong>Default Parameters Source:</strong> Growth models calibrated with data from <strong>Luke (Finnish Natural Resources Institute)</strong>:
                 <ul style={{ marginTop: '5px' }}>
                   <li>Pine: Max 450 t/ha, growth rate 0.08/year, NDVI saturation 0.85</li>
@@ -1430,19 +1434,29 @@ const ForestBiomassApp = () => {
 
             <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>4. Running Analysis</h4>
             <ul style={{ marginLeft: '20px' }}>
-              <li>After authentication and polygon drawing, click "Analyze with Process API"</li>
-              <li>Processing retrieves all cloud-free Sentinel-2 acquisitions from summer months (June-August) for the past 10 years</li>
-              <li>Each acquisition is processed individually (~500ms per image) - expect 3-10 minutes for full analysis</li>
+              <li>Draw a polygon and click "Analyze with Sentinel-2 Process API" (Pro/Business) or "Load Demo Analysis" (Free)</li>
+              <li>Processing retrieves all cloud-free Sentinel-2 acquisitions from summer months (June–August) for the past 10 years</li>
+              <li>Each acquisition is processed individually (~500ms per image) — expect 3–10 minutes for full analysis</li>
               <li>Progress updates show current processing stage</li>
+              <li><strong>Cancel:</strong> Click "Cancel" at any time to stop processing and keep any data already retrieved</li>
             </ul>
 
-            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>5. Interpreting Results</h4>
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>5. Saving & Loading Forests (Pro & Business)</h4>
+            <ul style={{ marginLeft: '20px' }}>
+              <li>After analyzing a forest, click "Save Forest" to save the polygon and analysis results</li>
+              <li>Saved forests appear in the "My Saved Forests" panel and as blue dashed outlines on the map</li>
+              <li>Click a saved forest card or its map outline to reload the forest and all its analysis data</li>
+              <li>Pro users can save up to 10 forests; Business users have unlimited forests</li>
+              <li>Delete a saved forest by clicking the &times; button on its card</li>
+            </ul>
+
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>6. Interpreting Results</h4>
             <ul style={{ marginLeft: '20px' }}>
               <li><strong>NDVI (Normalized Difference Vegetation Index):</strong>
                 <ul>
-                  <li>0.6-0.9: Healthy, dense forest vegetation</li>
-                  <li>0.3-0.6: Moderate vegetation/young forest</li>
-                  <li>0.1-0.3: Sparse vegetation/stressed forest</li>
+                  <li>0.6–0.9: Healthy, dense forest vegetation</li>
+                  <li>0.3–0.6: Moderate vegetation/young forest</li>
+                  <li>0.1–0.3: Sparse vegetation/stressed forest</li>
                   <li>&lt;0.1: Non-vegetated/water/bare soil</li>
                 </ul>
               </li>
@@ -1450,15 +1464,15 @@ const ForestBiomassApp = () => {
                 <ul>
                   <li>Calculated using logistic growth model coupled with NDVI measurements</li>
                   <li>Units: tons/hectare (dry biomass)</li>
-                  <li>Typical mature forest: 200-500 t/ha depending on species</li>
-                  <li>Annual growth: 5-20 t/ha/year for healthy forests</li>
+                  <li>Typical mature forest: 200–500 t/ha depending on species</li>
+                  <li>Annual growth: 5–20 t/ha/year for healthy forests</li>
                 </ul>
               </li>
               <li><strong>Chart Interpretation:</strong>
                 <ul>
                   <li>Individual points: Daily satellite acquisitions (weather permitting)</li>
                   <li>Thick lines: 7-day rolling averages (smooths atmospheric noise)</li>
-                  <li>Seasonal variations: Normal - highest NDVI/biomass in mid-summer</li>
+                  <li>Seasonal variations: Normal — highest NDVI/biomass in mid-summer</li>
                   <li>Long-term trend: Should show steady increase for growing forests</li>
                 </ul>
               </li>
@@ -1471,18 +1485,20 @@ const ForestBiomassApp = () => {
               </li>
             </ul>
 
-            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>6. Troubleshooting</h4>
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>7. Exporting Data</h4>
             <ul style={{ marginLeft: '20px' }}>
-              <li><strong>Low NDVI values:</strong> Verify polygon is over forested area, not water/urban/agricultural land</li>
-              <li><strong>No data found:</strong> Area may have persistent cloud cover - try different location</li>
-              <li><strong>Authentication errors:</strong> Token expired (10min limit) or incorrect credentials</li>
-              <li><strong>CORS errors:</strong> Use manual token mode instead of direct authentication</li>
+              <li><strong>CSV Export:</strong> Available to all users — download the full time series for analysis in Excel, R, or Python</li>
+              <li><strong>PDF Export:</strong> Business plan only — generate a comprehensive forest analysis report</li>
             </ul>
 
-            <p style={{ marginTop: '15px', padding: '10px', backgroundColor: '#ecfdf5', borderRadius: '4px' }}>
-              <strong>💡 Tip:</strong> Start with a small test polygon (~10-50 hectares) to verify setup before analyzing larger areas. 
-              Export results as CSV for further analysis in Excel or R/Python.
-            </p>
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>8. Troubleshooting</h4>
+            <ul style={{ marginLeft: '20px' }}>
+              <li><strong>Low NDVI values:</strong> Verify polygon is over forested area, not water/urban/agricultural land</li>
+              <li><strong>No data found:</strong> Area may have persistent cloud cover — try a different location</li>
+              <li><strong>Rate limit errors:</strong> Pro users have 100 Sentinel requests/day, Business users have 500/day. Limit resets at midnight</li>
+              <li><strong>Forest limit reached:</strong> Pro users can save up to 10 forests. Upgrade to Business for unlimited forests</li>
+              <li><strong>Login issues:</strong> Clear your browser cookies and try again, or register a new account</li>
+            </ul>
           </div>
         )}
       </div>
@@ -1527,16 +1543,19 @@ const ForestBiomassApp = () => {
 
             <h4>Key Spectral Bands Used:</h4>
             <pre style={styles.codeBlock}>
-{`B04 (Red): 665 nm wavelength - 10m resolution
-B08 (NIR - Near Infrared): 842 nm wavelength - 10m resolution
+{`B04 (Red):  665 nm - 10m resolution — chlorophyll absorption
+B05 (Red Edge): 705 nm - 20m resolution — chlorophyll density
+B08 (NIR):  842 nm - 10m resolution — canopy structure
+B11 (SWIR): 1610 nm - 20m resolution — canopy water content
 SCL (Scene Classification Layer): Cloud/snow/water mask - 20m resolution`}
             </pre>
 
             <h4>Why These Bands?</h4>
             <ul style={{ marginLeft: '20px' }}>
-              <li><strong>Red (B04)</strong>: Absorbed by chlorophyll in healthy vegetation</li>
+              <li><strong>Red (B04)</strong>: Absorbed by chlorophyll — forms NDVI with NIR</li>
+              <li><strong>Red Edge (B05)</strong>: Sensitive to chlorophyll density — forms NDRE with NIR</li>
               <li><strong>NIR (B08)</strong>: Strongly reflected by healthy vegetation's cellular structure</li>
-              <li>This contrast enables NDVI calculation</li>
+              <li><strong>SWIR (B11)</strong>: Sensitive to canopy water content — forms NDMI with NIR</li>
             </ul>
 
             <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>2. NDVI (Normalized Difference Vegetation Index)</h3>
@@ -1564,13 +1583,8 @@ SCL (Scene Classification Layer): Cloud/snow/water mask - 20m resolution`}
 
             <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>3. Data Acquisition Pipeline</h3>
 
-            <h4>Authentication Flow:</h4>
-            <pre style={styles.codeBlock}>
-{`// OAuth2 authentication with Copernicus Data Space
-POST https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token
-Body: grant_type=client_credentials&client_id=XXX&client_secret=YYY
-Returns: Access token (valid 10 minutes)`}
-            </pre>
+            <h4>Authentication:</h4>
+            <p>Sentinel Hub credentials are managed server-side. The backend authenticates with the Copernicus Data Space using OAuth2 client credentials and caches the access token. Users authenticate with MetsaData via email/password login (JWT stored in httpOnly cookies).</p>
 
             <h4>Step 1: Discovery - Catalog API</h4>
             <pre style={styles.codeBlock}>
@@ -1669,7 +1683,7 @@ Aspen: Max 250 t/ha, growth rate 0.15/year, NDVI saturation 0.80`}
 
             <h4>Data Collection Strategy:</h4>
             <ul style={{ marginLeft: '20px' }}>
-              <li><strong>Temporal range</strong>: Last 10 years (2015-2024)</li>
+              <li><strong>Temporal range</strong>: Last 10 years of summer data</li>
               <li><strong>Season</strong>: June-August only (peak growing season)</li>
               <li><strong>Frequency</strong>: Every available cloud-free acquisition</li>
               <li><strong>Result</strong>: ~50-150 data points over 10 years</li>
@@ -1690,15 +1704,17 @@ Aspen: Max 250 t/ha, growth rate 0.15/year, NDVI saturation 0.80`}
 
             <pre style={styles.codeBlock}>
 {`// GeoTIFF structure:
-- Format: Single-band FLOAT32
+- Format: 3-band FLOAT32 (NDVI, NDMI, NDRE)
 - Compression: DEFLATE/LZW
-- Values: -1.0 to 1.0 (NDVI range)
+- Values: -1.0 to 1.0 per band
 - NoData: NaN (masked pixels)
 
 // Processing with GeoTIFF.js:
 const tiff = await GeoTIFF.fromArrayBuffer(response);
 const rasters = await image.readRasters();
-const ndviArray = rasters[0];  // Float32Array`}
+const ndviArray = rasters[0];   // Float32Array
+const ndmiArray = rasters[1];   // Moisture index
+const ndreArray = rasters[2];   // Red edge index`}
             </pre>
 
             <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>8. Key Technical Features</h3>
@@ -1754,11 +1770,11 @@ const ndviArray = rasters[0];  // Float32Array`}
               <li>NDVI range validation (-1 to 1)</li>
               <li>Cloud coverage thresholds</li>
               <li>Minimum valid pixel requirements</li>
-              <li>Token expiration monitoring</li>
+              <li>Rate limit monitoring (per-user daily quotas)</li>
             </ul>
 
             <p style={{ marginTop: '20px', padding: '10px', backgroundColor: '#ecfdf5', borderRadius: '4px' }}>
-              This comprehensive system provides scientifically-grounded forest monitoring using free, open satellite data with regular updates every few days during growing season.
+              This comprehensive system provides scientifically-grounded forest monitoring using ESA Sentinel-2 satellite data with regular updates every few days during growing season.
             </p>
           </div>
         )}
@@ -1773,16 +1789,34 @@ const ndviArray = rasters[0];  // Float32Array`}
       <div style={styles.controls}>
         <div>
           <label style={styles.label}>Forest Type</label>
-          <select
-            style={styles.select}
-            value={forestType}
-            onChange={(e) => handleForestTypeChange(e.target.value)}
-          >
-            <option value="pine">Pine</option>
-            <option value="fir">Fir</option>
-            <option value="birch">Birch</option>
-            <option value="aspen">Aspen</option>
-          </select>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+            {[
+              { value: 'pine', emoji: '\uD83C\uDF32', name: 'Pine', hint: 'Needles, cones' },
+              { value: 'fir', emoji: '\uD83C\uDF84', name: 'Fir', hint: 'Dense, conical' },
+              { value: 'birch', emoji: '\uD83C\uDF43', name: 'Birch', hint: 'White bark, leaves' },
+              { value: 'aspen', emoji: '\uD83C\uDF42', name: 'Aspen', hint: 'Trembling leaves' },
+            ].map(t => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => handleForestTypeChange(t.value)}
+                style={{
+                  padding: '8px 6px',
+                  border: forestType === t.value ? `2px solid ${colors.medGreen}` : `1px solid ${colors.gray200}`,
+                  borderRadius: '8px',
+                  backgroundColor: forestType === t.value ? '#ecfdf5' : colors.white,
+                  cursor: 'pointer',
+                  textAlign: 'center',
+                  fontSize: '13px',
+                  lineHeight: '1.3',
+                }}
+              >
+                <span style={{ fontSize: '22px', display: 'block' }}>{t.emoji}</span>
+                <strong>{t.name}</strong>
+                <span style={{ display: 'block', fontSize: '11px', color: colors.gray500 }}>{t.hint}</span>
+              </button>
+            ))}
+          </div>
         </div>
         <div>
           <label style={styles.label}>Current Forest Age (years)</label>
@@ -2013,8 +2047,8 @@ const ndviArray = rasters[0];  // Float32Array`}
         <p style={{ fontSize: '12px', marginTop: '10px', padding: '10px', backgroundColor: colors.white, borderRadius: '12px', border: `1px solid ${colors.gray200}`, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
           <strong>Processing Summary:</strong> Analyzed {biomassData.length} Sentinel-2 acquisitions over {((new Date(biomassData[biomassData.length - 1].date) - new Date(biomassData[0].date)) / 31536000000).toFixed(1)} years
           with {(biomassData.reduce((sum, d) => sum + parseFloat(d.coverage), 0) / biomassData.length).toFixed(1)}% average cloud-free coverage.
-          Biomass increased from {biomassData[0].biomass.toFixed(1)} to {biomassData[biomassData.length - 1].biomass.toFixed(1)} tons/ha,
-          representing {((biomassData[biomassData.length - 1].biomass - biomassData[0].biomass) / biomassData[0].biomass * 100).toFixed(1)}% growth.
+          Biomass increased from {(biomassData[0].biomassRollingAvg ?? biomassData[0].biomass).toFixed(1)} to {(biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass).toFixed(1)} tons/ha,
+          representing {(((biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass) - (biomassData[0].biomassRollingAvg ?? biomassData[0].biomass)) / (biomassData[0].biomassRollingAvg ?? biomassData[0].biomass) * 100).toFixed(1)}% growth.
         </p>
       )}
 
@@ -2030,7 +2064,7 @@ const ndviArray = rasters[0];  // Float32Array`}
               }}
               onClick={() => setSelectedForestIndex(idx)}
             >
-              <h3>Forest #{idx + 1}</h3>
+              <h3>{forest.name || `Forest #${idx + 1}`}</h3>
               <p><strong>Type:</strong> {forest.type}</p>
               <p><strong>Area:</strong> {forest.area} hectares</p>
               <p><strong>Current Age:</strong> {estimateAgeMode ? (ageEstimate ? `${ageEstimate.estimatedAge} years (estimated)` : 'Pending estimation...') : `${forestAge} years`}</p>
@@ -2218,10 +2252,10 @@ const ndviArray = rasters[0];  // Float32Array`}
                         Biomass (tons/ha) is estimated from each NDVI reading using a logistic growth curve calibrated per species. Parameters: pine max 450 t/ha at growth rate 0.08, fir 500 t/ha at 0.07, birch 300 t/ha at 0.12, aspen 250 t/ha at 0.15. Current and initial values are the last and first observations. Annual growth rate = (current − initial) / years elapsed.
                       </InfoButton></div>
                       <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
-                        <li>Current Biomass: {biomassData[biomassData.length - 1].biomass.toFixed(2)} tons/ha</li>
-                        <li>Initial Biomass: {biomassData[0].biomass.toFixed(2)} tons/ha</li>
-                        <li>Total Accumulation: {(biomassData[biomassData.length - 1].biomass - biomassData[0].biomass).toFixed(2)} tons/ha</li>
-                        <li>Annual Growth Rate: {((biomassData[biomassData.length - 1].biomass - biomassData[0].biomass) / ((new Date(biomassData[biomassData.length - 1].date) - new Date(biomassData[0].date)) / 31536000000)).toFixed(2)} tons/ha/year</li>
+                        <li>Current Biomass: {(biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass).toFixed(2)} tons/ha</li>
+                        <li>Initial Biomass: {(biomassData[0].biomassRollingAvg ?? biomassData[0].biomass).toFixed(2)} tons/ha</li>
+                        <li>Total Accumulation: {((biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass) - (biomassData[0].biomassRollingAvg ?? biomassData[0].biomass)).toFixed(2)} tons/ha</li>
+                        <li>Annual Growth Rate: {(((biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass) - (biomassData[0].biomassRollingAvg ?? biomassData[0].biomass)) / ((new Date(biomassData[biomassData.length - 1].date) - new Date(biomassData[0].date)) / 31536000000)).toFixed(2)} tons/ha/year</li>
                       </ul>
                     </div>
                     <div>
@@ -2294,7 +2328,7 @@ const ndviArray = rasters[0];  // Float32Array`}
             {biomassData.length > 0 && (() => {
               const currentType = selectedForests[selectedForestIndex].type;
               const currentArea = parseFloat(selectedForests[selectedForestIndex].area);
-              const latestBiomass = biomassData[biomassData.length - 1].biomass;
+              const latestBiomass = biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass;
               const priceRange = calculatePriceRange(latestBiomass, currentType, forestAge, currentArea);
               const harvestDelay = analyzeHarvestDelay(currentType, forestAge, currentArea);
 
@@ -2781,7 +2815,7 @@ const ndviArray = rasters[0];  // Float32Array`}
             {biodiversityEstimate && biomassData.length > 0 && (() => {
               const currentType = selectedForests[selectedForestIndex].type;
               const currentArea = parseFloat(selectedForests[selectedForestIndex].area);
-              const latestBiomass = biomassData[biomassData.length - 1].biomass;
+              const latestBiomass = biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass;
               const density = BASIC_DENSITY[currentType] || BASIC_DENSITY.pine;
               const volumePerHa = latestBiomass / density;
               const timberVal = estimateTimberValue(latestBiomass, currentType, forestAge, currentArea);
@@ -2902,7 +2936,7 @@ const ndviArray = rasters[0];  // Float32Array`}
             {biomassData.length > 0 && (() => {
               const currentType = selectedForests[selectedForestIndex].type;
               const currentArea = parseFloat(selectedForests[selectedForestIndex].area);
-              const latestBiomass = biomassData[biomassData.length - 1].biomass;
+              const latestBiomass = biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass;
               const timberVal = estimateTimberValue(latestBiomass, currentType, forestAge, currentArea);
               const carbonData = biomassToCarbon(latestBiomass, currentType);
               const creditVal = estimateCarbonCreditValue(carbonData.co2eTons * currentArea);
