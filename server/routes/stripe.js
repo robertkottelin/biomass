@@ -2,6 +2,7 @@ const express = require('express');
 const knex = require('knex');
 const knexConfig = require('../db/knexfile');
 const { requireAuth } = require('../middleware/auth');
+const logger = require('../lib/logger');
 
 const db = knex(knexConfig);
 const router = express.Router();
@@ -72,7 +73,7 @@ router.post('/webhook', async (req, res, next) => {
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
     if (!webhookSecret) {
-      console.error('STRIPE_WEBHOOK_SECRET not configured');
+      logger.error('STRIPE_WEBHOOK_SECRET not configured');
       return res.status(500).json({ error: 'Webhook not configured' });
     }
 
@@ -80,7 +81,7 @@ router.post('/webhook', async (req, res, next) => {
     try {
       event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
     } catch (err) {
-      console.error('Webhook signature verification failed:', err.message);
+      logger.warn('Webhook signature verification failed', err);
       return res.status(400).json({ error: 'Webhook signature verification failed' });
     }
 
@@ -93,7 +94,7 @@ router.post('/webhook', async (req, res, next) => {
         // Find user by stripe_customer_id
         const user = await db('users').where('stripe_customer_id', customerId).first();
         if (!user) {
-          console.error('No user found for Stripe customer:', customerId);
+          logger.error('No user found for Stripe customer', { customerId });
           break;
         }
 

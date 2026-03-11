@@ -25,7 +25,7 @@ const api = {
     }).then(handleResponse);
   },
 
-  post(path, body) {
+  post(path, body, { signal } = {}) {
     return fetch(`${BASE_URL}${path}`, {
       method: 'POST',
       credentials: 'include',
@@ -34,15 +34,25 @@ const api = {
         'Accept': 'application/json',
       },
       body: JSON.stringify(body),
+      signal,
     }).then(handleResponse);
   },
 
-  postRaw(path, body, headers = {}) {
+  del(path) {
+    return fetch(`${BASE_URL}${path}`, {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: { 'Accept': 'application/json' },
+    }).then(handleResponse);
+  },
+
+  postRaw(path, body, headers = {}, { signal } = {}) {
     return fetch(`${BASE_URL}${path}`, {
       method: 'POST',
       credentials: 'include',
       headers,
       body,
+      signal,
     }).then(async (response) => {
       if (!response.ok) {
         let message = `Request failed with status ${response.status}`;

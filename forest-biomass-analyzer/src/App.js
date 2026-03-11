@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { MapContainer, TileLayer, FeatureGroup, Polygon, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, FeatureGroup, Polygon, useMap, Tooltip as LeafletTooltip } from 'react-leaflet';
 import { Line, LineChart, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { estimateTreeCount } from './treeEstimation';
 import { analyzeForestHealth } from './healthEstimation';
@@ -12,6 +12,7 @@ import { assessDeforestationRisk, generateComplianceReport } from './eudrComplia
 import { assessMetsoEligibility, estimateMetsoCompensation, assessNRLCompliance, compareProtectionVsHarvest } from './regulatoryCompliance';
 import { calculateInheritanceTax, projectManagementScenarios, generateAssetSummary, estimateManagementWorkload, LAND_VALUE_PER_HA } from './successionPlanning';
 import { estimateTimberValue, biomassToCarbon, estimateCarbonCreditValue, EU_ETS_PRICE_PER_TON, BASIC_DENSITY } from './carbonCalculation';
+import { estimateForestAge } from './ageEstimation';
 import { useAuth } from './AuthContext';
 import LandingPage from './LandingPage';
 import Login from './Login';
@@ -137,21 +138,21 @@ const InfoButton = ({ id, showInfo, setShowInfo, children }) => (
       style={{
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         width: '18px', height: '18px', borderRadius: '50%',
-        border: '1.5px solid #888', color: '#888', fontSize: '12px',
+        border: '1.5px solid #6b7280', color: '#6b7280', fontSize: '12px',
         fontWeight: 'bold', fontStyle: 'italic', fontFamily: 'Georgia, serif',
         cursor: 'pointer', userSelect: 'none'
       }}
       title="How is this calculated?"
     >i</span>
     {showInfo[id] && (
-      <div style={{
+      <div data-pdf-exclude style={{
         marginTop: '8px', fontSize: '11px', color: '#555', lineHeight: '1.6',
-        backgroundColor: '#f4f4f4', padding: '10px', borderRadius: '4px',
+        backgroundColor: '#f3f4f6', padding: '10px', borderRadius: '4px',
         position: 'relative'
       }}>
         <span
           onClick={() => setShowInfo(prev => ({ ...prev, [id]: false }))}
-          style={{ position: 'absolute', top: '4px', right: '8px', cursor: 'pointer', fontSize: '14px', color: '#999' }}
+          style={{ position: 'absolute', top: '4px', right: '8px', cursor: 'pointer', fontSize: '14px', color: '#6b7280' }}
         >&times;</span>
         {children}
       </div>
@@ -159,9 +160,27 @@ const InfoButton = ({ id, showInfo, setShowInfo, children }) => (
   </span>
 );
 
+const colors = {
+  darkGreen: '#1a472a',
+  medGreen: '#2d6a4f',
+  lightGreen: '#40916c',
+  paleGreen: '#b7e4c7',
+  offWhite: '#f5f7f5',
+  white: '#ffffff',
+  gray100: '#f3f4f6',
+  gray200: '#e5e7eb',
+  gray500: '#6b7280',
+  gray700: '#374151',
+  gray900: '#111827',
+};
+
+const dashFontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+
 const ForestBiomassApp = () => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const isDemo = !user || user.plan === 'free';
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState('');
   const [selectedForests, setSelectedForests] = useState([]);
   const [forestType, setForestType] = useState('pine');
   const [forestAge, setForestAge] = useState(20);
@@ -177,6 +196,142 @@ const ForestBiomassApp = () => {
   const [healthEstimate, setHealthEstimate] = useState(null);
   const [biodiversityEstimate, setBiodiversityEstimate] = useState(null);
   const [showInfo, setShowInfo] = useState({});
+  const [estimateAgeMode, setEstimateAgeMode] = useState(false);
+  const [ageEstimate, setAgeEstimate] = useState(null);
+  const [savedForests, setSavedForests] = useState([]);
+  const [showSavedForests, setShowSavedForests] = useState(false);
+  const [savingForest, setSavingForest] = useState(false);
+  const [loadedForestId, setLoadedForestId] = useState(null);
+  const abortControllerRef = useRef(null);
+
+  // Fetch saved forests for Pro/Business users
+  const fetchSavedForests = useCallback(async () => {
+    if (isDemo) return;
+    try {
+      const data = await api.get('/api/forests');
+      setSavedForests(data.forests);
+    } catch (err) {
+      console.error('Failed to fetch saved forests:', err);
+    }
+  }, [isDemo]);
+
+  useEffect(() => {
+    fetchSavedForests();
+  }, [fetchSavedForests]);
+
+  // Save the current analyzed forest
+  const saveCurrentForest = async () => {
+    if (!selectedForests.length || !biomassData.length) return;
+    const forest = selectedForests[selectedForestIndex];
+    const defaultName = `${forestType.charAt(0).toUpperCase() + forestType.slice(1)} Forest – ${forest.area}ha`;
+    const name = window.prompt('Name this forest:', defaultName);
+    if (!name) return;
+
+    setSavingForest(true);
+    try {
+      // Convert Leaflet [lat,lng] → GeoJSON [lng,lat] and close ring
+      const coords = forest.coords.map(c => [c[1], c[0]]);
+      if (coords.length > 0 && (coords[0][0] !== coords[coords.length - 1][0] || coords[0][1] !== coords[coords.length - 1][1])) {
+        coords.push(coords[0]);
+      }
+      const polygon_geojson = { type: 'Polygon', coordinates: [coords] };
+
+      const result = await api.post('/api/forests', {
+        name,
+        polygon_geojson,
+        forest_type: forestType,
+        forest_age: forestAge,
+        area_hectares: parseFloat(forest.area),
+      });
+
+      // Save analysis data
+      await api.post(`/api/forests/${result.forest.id}/analyses`, {
+        biomass_data_json: biomassData,
+      });
+
+      await fetchSavedForests();
+      setShowSavedForests(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingForest(false);
+    }
+  };
+
+  // Load a saved forest and its analysis
+  const loadSavedForest = async (forestId) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.get(`/api/forests/${forestId}`);
+      const forest = data.forest;
+      const geojson = typeof forest.polygon_geojson === 'string' ? JSON.parse(forest.polygon_geojson) : forest.polygon_geojson;
+      const coords = geojson.coordinates[0].map(c => [c[1], c[0]]);
+
+      setSelectedForests([{
+        id: Date.now(),
+        coords,
+        area: (forest.area_hectares || 0).toFixed(2),
+        type: forest.forest_type,
+      }]);
+      setSelectedForestIndex(0);
+      setForestType(forest.forest_type || 'pine');
+      setForestAge(forest.forest_age || 20);
+      setLoadedForestId(forestId);
+
+      if (data.analysis && data.analysis.biomass_data) {
+        const finalResults = data.analysis.biomass_data;
+        setBiomassData(finalResults);
+
+        const latestNdviValues = finalResults.slice(-5).map(d => d.ndvi);
+        const area = forest.area_hectares || 0;
+        const type = forest.forest_type || 'pine';
+        const age = forest.forest_age || 20;
+
+        const treeEst = estimateTreeCount(latestNdviValues, type, age, area);
+        setTreeEstimate(treeEst);
+
+        const healthResult = analyzeForestHealth(finalResults, type, age);
+        setHealthEstimate(healthResult);
+
+        const bioEst = estimateBiodiversity(finalResults, treeEst, healthResult, type, age, area);
+        setBiodiversityEstimate(bioEst);
+      } else {
+        setBiomassData([]);
+        setTreeEstimate(null);
+        setHealthEstimate(null);
+        setBiodiversityEstimate(null);
+      }
+
+      setAgeEstimate(null);
+      setEstimateAgeMode(false);
+
+      // Fly map to loaded polygon
+      if (mapRef.current) {
+        const bounds = L.latLngBounds(coords);
+        mapRef.current.flyToBounds(bounds, { padding: [50, 50] });
+      }
+    } catch (err) {
+      setError(`Failed to load forest: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Delete a saved forest
+  const deleteSavedForest = async (forestId, e) => {
+    e.stopPropagation();
+    if (!window.confirm('Delete this saved forest?')) return;
+    try {
+      await api.del(`/api/forests/${forestId}`);
+      setSavedForests(prev => prev.filter(f => f.id !== forestId));
+      if (loadedForestId === forestId) {
+        setLoadedForestId(null);
+      }
+    } catch (err) {
+      setError(`Failed to delete forest: ${err.message}`);
+    }
+  };
 
   // Load GeometryUtil and GeoTIFF on mount
   useEffect(() => {
@@ -186,7 +341,7 @@ const ForestBiomassApp = () => {
   }, []);
 
   // Fetch NDVI data using Process API - FIXED VERSION with GeoTIFF.js
-  const fetchNDVIData = async (polygon, dateFrom, dateTo) => {
+  const fetchNDVIData = async (polygon, dateFrom, dateTo, { signal } = {}) => {
     // CRITICAL FIX: Ensure correct coordinate order [lng, lat] for WGS84
     const coords = polygon.coords.map(coord => [coord[1], coord[0]]); // Convert from [lat,lng] to [lng,lat]
 
@@ -310,7 +465,7 @@ const ForestBiomassApp = () => {
       const response = await api.postRaw('/api/sentinel/process', JSON.stringify(processRequest), {
         'Content-Type': 'application/json',
         'Accept': 'image/tiff'
-      });
+      }, { signal });
 
       // Parse TIFF response using GeoTIFF.js
       const arrayBuffer = await response.arrayBuffer();
@@ -385,7 +540,7 @@ const ForestBiomassApp = () => {
   };
 
   // Fetch available acquisition dates using Catalog API
-  const fetchAvailableDates = async (bbox, dateFrom, dateTo) => {
+  const fetchAvailableDates = async (bbox, dateFrom, dateTo, { signal } = {}) => {
     const catalogRequest = {
       bbox: bbox,
       datetime: `${dateFrom}T00:00:00Z/${dateTo}T23:59:59Z`,
@@ -395,7 +550,7 @@ const ForestBiomassApp = () => {
     };
 
     try {
-      const data = await api.post('/api/sentinel/catalog', catalogRequest);
+      const data = await api.post('/api/sentinel/catalog', catalogRequest, { signal });
 
       // Extract unique dates from features
       const dates = new Set();
@@ -408,6 +563,9 @@ const ForestBiomassApp = () => {
 
       return Array.from(dates).sort();
     } catch (error) {
+      if (error.name === 'AbortError' || (error.message && error.message.includes('limit'))) {
+        throw error;
+      }
       return [];
     }
   };
@@ -434,6 +592,24 @@ const ForestBiomassApp = () => {
 
       // Process demo biomass data
       let results = demo.biomassData;
+
+      // Age estimation from NDVI trend (if enabled)
+      if (estimateAgeMode) {
+        const ageResult = estimateForestAge(results, demo.forest.type);
+        if (ageResult) {
+          setAgeEstimate(ageResult);
+          setForestAge(ageResult.estimatedAge);
+          const correctedAgeStart = ageResult.estimatedAge - 10;
+          for (const r of results) {
+            r.biomass = estimateBiomass(r.ndvi, demo.forest.type, r.yearsFromStart, correctedAgeStart);
+            r.forestAge = correctedAgeStart + r.yearsFromStart;
+          }
+        } else {
+          setAgeEstimate(null);
+          setEstimateAgeMode(false);
+        }
+      }
+
       let withRolling = calculateRollingAverage(results, 'biomass', 7);
       withRolling = calculateRollingAverage(withRolling, 'ndvi', 7);
       withRolling = calculateRollingAverage(withRolling, 'ndmi', 7);
@@ -478,6 +654,14 @@ const ForestBiomassApp = () => {
       return;
     }
 
+    // Abort any previous processing
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+    const signal = abortController.signal;
+
     setLoading(true);
     setError(null);
     setBiomassData([]);
@@ -493,7 +677,7 @@ const ForestBiomassApp = () => {
 
       // Calculate forest age at the start of analysis period
       // User enters current age, we calculate age 10 years ago
-      const ageAtAnalysisStart = forestAge - 10;
+      const ageAtAnalysisStart = (estimateAgeMode ? 40 : forestAge) - 10;
 
       // Calculate bbox from polygon
       const coords = selectedForest.coords.map(coord => [coord[1], coord[0]]); // [lng, lat]
@@ -525,14 +709,16 @@ const ForestBiomassApp = () => {
           }
         }
 
+        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
         setProcessingStatus(`Fetching available dates for ${year} summer...`);
 
         // Get available acquisition dates from Catalog API
-        const availableDates = await fetchAvailableDates(bbox, dateFrom, dateTo);
+        const availableDates = await fetchAvailableDates(bbox, dateFrom, dateTo, { signal });
 
         // Process each available date
         for (let i = 0; i < availableDates.length; i++) {
           const acquisitionDate = availableDates[i];
+          if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
           setProcessingStatus(`Processing ${acquisitionDate} (${i + 1}/${availableDates.length} for ${year})...`);
 
           try {
@@ -544,7 +730,8 @@ const ForestBiomassApp = () => {
             const ndviStats = await fetchNDVIData(
               selectedForest,
               acquisitionDate,
-              nextDay.toISOString().split('T')[0]
+              nextDay.toISOString().split('T')[0],
+              { signal }
             );
 
             if (ndviStats && ndviStats.validPixels > 0) {
@@ -579,15 +766,24 @@ const ForestBiomassApp = () => {
               });
             }
           } catch (dateError) {
-            // Continue with next date
+            if (dateError.name === 'AbortError' || (dateError.message && dateError.message.includes('limit'))) {
+              throw dateError;
+            }
+            // Continue with next date on other errors
           }
 
           // Rate limiting - 500ms between requests
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise((resolve, reject) => {
+            const tid = setTimeout(resolve, 500);
+            signal.addEventListener('abort', () => { clearTimeout(tid); reject(new DOMException('Aborted', 'AbortError')); }, { once: true });
+          });
         }
 
         // Longer delay between years
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise((resolve, reject) => {
+          const tid = setTimeout(resolve, 2000);
+          signal.addEventListener('abort', () => { clearTimeout(tid); reject(new DOMException('Aborted', 'AbortError')); }, { once: true });
+        });
       }
 
       if (results.length === 0) {
@@ -597,6 +793,24 @@ const ForestBiomassApp = () => {
 
       // Sort by date
       results.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      // Age estimation from NDVI trend (Pro & Business only)
+      if (estimateAgeMode) {
+        const ageResult = estimateForestAge(results, selectedForest.type);
+        if (ageResult) {
+          setAgeEstimate(ageResult);
+          setForestAge(ageResult.estimatedAge);
+          // Recompute biomass with corrected age
+          const correctedAgeStart = ageResult.estimatedAge - 10;
+          for (const r of results) {
+            r.biomass = estimateBiomass(r.ndvi, selectedForest.type, r.yearsFromStart, correctedAgeStart);
+            r.forestAge = correctedAgeStart + r.yearsFromStart;
+          }
+        } else {
+          setAgeEstimate(null);
+          setEstimateAgeMode(false);
+        }
+      }
 
       // Calculate rolling averages with larger window for daily data
       let withRolling = calculateRollingAverage(results, 'biomass', 7);
@@ -647,10 +861,24 @@ const ForestBiomassApp = () => {
       }
 
     } catch (err) {
+      if (err.name === 'AbortError') {
+        setProcessingStatus('');
+        return;
+      }
       setError(`Processing error: ${err.message}`);
     } finally {
       setLoading(false);
       setProcessingStatus('');
+      if (abortControllerRef.current === abortController) {
+        abortControllerRef.current = null;
+      }
+    }
+  };
+
+  const cancelProcessing = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
   };
 
@@ -703,6 +931,7 @@ const ForestBiomassApp = () => {
       });
 
       setBiomassData([]);
+      setAgeEstimate(null);
     }
   };
 
@@ -796,17 +1025,40 @@ const ForestBiomassApp = () => {
     document.body.removeChild(link);
   };
 
+  const exportToPdf = async () => {
+    setExportingPdf(true);
+    try {
+      const { generatePdfReport } = await import('./pdfExport');
+      await generatePdfReport({
+        title: 'Forest Analysis Report',
+        forestType: selectedForests[selectedForestIndex]?.type || forestType,
+        forestAge,
+        areaHectares: parseFloat(selectedForests[selectedForestIndex]?.area || 0),
+        generatedDate: new Date().toISOString().slice(0, 10),
+        onProgress: (msg, pct) => setPdfProgress(`${msg} (${Math.round(pct)}%)`)
+      });
+    } catch (err) {
+      console.error('PDF export failed:', err);
+    } finally {
+      setExportingPdf(false);
+      setPdfProgress('');
+    }
+  };
+
   const styles = {
     container: {
       maxWidth: '1200px',
       margin: '0 auto',
-      padding: '20px',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+      padding: '88px 24px 24px',
+      fontFamily: dashFontFamily,
+      backgroundColor: colors.offWhite,
+      minHeight: '100vh'
     },
     header: {
-      textAlign: 'center',
-      marginBottom: '20px',
-      color: '#2c3e50'
+      fontSize: '24px',
+      fontWeight: 700,
+      color: colors.darkGreen,
+      marginBottom: '20px'
     },
     controls: {
       display: 'grid',
@@ -814,63 +1066,74 @@ const ForestBiomassApp = () => {
       gap: '15px',
       marginBottom: '20px',
       padding: '20px',
-      backgroundColor: '#f8f9fa',
-      borderRadius: '8px'
+      backgroundColor: colors.white,
+      borderRadius: '12px',
+      border: `1px solid ${colors.gray200}`,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
     },
     input: {
       padding: '8px 12px',
-      border: '1px solid #ddd',
-      borderRadius: '4px',
+      border: `1px solid ${colors.gray200}`,
+      borderRadius: '8px',
       fontSize: '14px',
-      width: '100%'
+      width: '100%',
+      color: colors.gray900
     },
     select: {
       padding: '8px 12px',
-      border: '1px solid #ddd',
-      borderRadius: '4px',
+      border: `1px solid ${colors.gray200}`,
+      borderRadius: '8px',
       fontSize: '14px',
       width: '100%',
-      backgroundColor: 'white'
+      backgroundColor: colors.white,
+      color: colors.gray900
     },
     label: {
       display: 'block',
       marginBottom: '5px',
-      fontWeight: '500',
-      color: '#555'
+      fontWeight: 600,
+      fontSize: '13px',
+      color: colors.gray700,
+      textTransform: 'uppercase',
+      letterSpacing: '0.025em'
     },
     button: {
       padding: '10px 20px',
-      backgroundColor: '#007bff',
+      backgroundColor: colors.darkGreen,
       color: 'white',
       border: 'none',
-      borderRadius: '4px',
-      fontSize: '16px',
+      borderRadius: '8px',
+      fontSize: '15px',
+      fontWeight: 600,
       cursor: 'pointer',
       marginTop: '20px'
     },
     buttonDisabled: {
-      backgroundColor: '#ccc',
+      backgroundColor: colors.gray200,
+      color: colors.gray500,
       cursor: 'not-allowed'
     },
     authSection: {
-      backgroundColor: '#fff',
+      backgroundColor: colors.white,
       padding: '20px',
-      borderRadius: '8px',
+      borderRadius: '12px',
       marginBottom: '20px',
-      border: '1px solid #e9ecef'
+      border: `1px solid ${colors.gray200}`,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
     },
     mapContainer: {
       height: '600px',
       marginBottom: '20px',
-      borderRadius: '8px',
+      borderRadius: '12px',
       overflow: 'hidden',
-      boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+      border: `1px solid ${colors.gray200}`,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
     },
     chartContainer: {
-      backgroundColor: 'white',
-      padding: '20px',
-      borderRadius: '8px',
-      boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      backgroundColor: colors.white,
+      padding: '24px',
+      borderRadius: '12px',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
       marginBottom: '20px'
     },
     forestInfo: {
@@ -880,55 +1143,57 @@ const ForestBiomassApp = () => {
       marginBottom: '20px'
     },
     infoCard: {
-      backgroundColor: '#f8f9fa',
+      backgroundColor: colors.white,
       padding: '15px',
-      borderRadius: '8px',
-      border: '1px solid #e9ecef'
+      borderRadius: '12px',
+      border: `1px solid ${colors.gray200}`,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
     },
     error: {
-      backgroundColor: '#f8d7da',
-      color: '#721c24',
+      backgroundColor: '#fef2f2',
+      color: '#991b1b',
       padding: '12px 20px',
-      borderRadius: '4px',
+      borderRadius: '8px',
       marginBottom: '20px',
-      border: '1px solid #f5c6cb'
+      border: '1px solid #fecaca'
     },
     warning: {
-      backgroundColor: '#fff3cd',
-      color: '#856404',
+      backgroundColor: '#fffbeb',
+      color: '#92400e',
       padding: '12px 20px',
-      borderRadius: '4px',
+      borderRadius: '8px',
       marginBottom: '20px',
-      border: '1px solid #ffeeba'
+      border: '1px solid #fde68a'
     },
     loading: {
       textAlign: 'center',
       padding: '40px',
       fontSize: '18px',
-      color: '#666'
+      color: colors.gray500
     },
     info: {
-      backgroundColor: '#d1ecf1',
-      color: '#0c5460',
+      backgroundColor: '#ecfdf5',
+      color: colors.darkGreen,
       padding: '12px 20px',
-      borderRadius: '4px',
+      borderRadius: '8px',
       marginBottom: '20px',
-      border: '1px solid #bee5eb'
+      border: `1px solid ${colors.paleGreen}`
     },
     techDetails: {
       marginTop: '20px',
       padding: '15px',
-      backgroundColor: '#f8f9fa',
-      borderRadius: '4px',
+      backgroundColor: colors.white,
+      borderRadius: '12px',
       fontSize: '14px'
     },
     exportButton: {
       padding: '10px 20px',
-      backgroundColor: '#28a745',
+      backgroundColor: colors.medGreen,
       color: 'white',
       border: 'none',
-      borderRadius: '4px',
-      fontSize: '16px',
+      borderRadius: '8px',
+      fontSize: '15px',
+      fontWeight: 600,
       cursor: 'pointer',
       marginLeft: '10px'
     },
@@ -942,35 +1207,168 @@ const ForestBiomassApp = () => {
       marginRight: '8px'
     },
     note: {
-      backgroundColor: '#ffeeba',
+      backgroundColor: '#fffbeb',
       padding: '10px',
-      borderRadius: '4px',
+      borderRadius: '8px',
       fontSize: '14px',
-      color: '#856404',
+      color: '#92400e',
       marginTop: '10px'
     },
     codeBlock: {
-      backgroundColor: '#f5f5f5',
+      backgroundColor: colors.gray100,
       padding: '10px',
-      borderRadius: '4px',
+      borderRadius: '8px',
       fontSize: '12px',
       overflow: 'auto',
-      fontFamily: 'monospace'
+      fontFamily: 'monospace',
+      border: `1px solid ${colors.gray200}`
+    },
+    dashNav: {
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      backgroundColor: colors.darkGreen,
+      zIndex: 1000,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+    },
+    dashNavInner: {
+      maxWidth: '1200px',
+      margin: '0 auto',
+      padding: '0 24px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      height: '64px'
+    },
+    dashBrand: {
+      fontSize: '20px',
+      fontWeight: 700,
+      color: colors.white,
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      textDecoration: 'none'
+    },
+    dashNavRight: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '16px'
+    },
+    dashNavLink: {
+      color: colors.paleGreen,
+      fontSize: '14px',
+      textDecoration: 'none',
+      cursor: 'pointer',
+      background: 'none',
+      border: 'none',
+      fontFamily: dashFontFamily
+    },
+    dashNavLogout: {
+      color: colors.white,
+      fontSize: '13px',
+      fontWeight: 600,
+      cursor: 'pointer',
+      background: 'rgba(255,255,255,0.12)',
+      border: 'none',
+      borderRadius: '6px',
+      padding: '6px 14px',
+      fontFamily: dashFontFamily
+    },
+    moduleCard: {
+      backgroundColor: colors.white,
+      padding: '15px',
+      borderRadius: '12px',
+      marginBottom: '20px',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+    },
+    moduleHeading: {
+      fontSize: '16px',
+      fontWeight: 700,
+      color: colors.darkGreen,
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      margin: '0 0 12px 0'
+    },
+    statCard: {
+      backgroundColor: colors.gray100,
+      padding: '12px',
+      borderRadius: '10px',
+      border: `1px solid ${colors.gray200}`,
+      textAlign: 'center'
+    },
+    statLabel: {
+      fontSize: '11px',
+      color: colors.gray500,
+      fontWeight: 600,
+      textTransform: 'uppercase',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '4px'
+    },
+    statValue: {
+      fontSize: '24px',
+      fontWeight: 700,
+      color: colors.darkGreen,
+      margin: '6px 0'
+    },
+    moduleFootnote: {
+      fontSize: '11px',
+      color: colors.gray500,
+      margin: '10px 0 0 0',
+      fontStyle: 'italic'
     }
   };
 
   return (
-    <div style={styles.container}>
-      <h1 style={styles.header}>Sentinel-2 Forest Monitoring - NDVI Time Series & Biomass Analysis</h1>
+    <>
+      <nav style={styles.dashNav}>
+        <div style={styles.dashNavInner}>
+          <a href="/" style={styles.dashBrand}>{'\uD83C\uDF32'} MetsaData</a>
+          <div style={styles.dashNavRight}>
+            <a href="/" style={styles.dashNavLink}>Home</a>
+            {user && <>
+              <span style={{ color: colors.paleGreen, fontSize: '13px' }}>{user.email}</span>
+              <span style={{
+                fontSize: '11px',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                padding: '3px 8px',
+                borderRadius: '4px',
+                letterSpacing: '0.5px',
+                background: user.plan === 'business' ? 'rgba(251,191,36,0.2)' : user.plan === 'pro' ? 'rgba(96,165,250,0.2)' : 'rgba(255,255,255,0.12)',
+                color: user.plan === 'business' ? '#fbbf24' : user.plan === 'pro' ? '#60a5fa' : 'rgba(255,255,255,0.7)',
+              }}>
+                {user.plan === 'business' ? 'Business' : user.plan === 'pro' ? 'Pro' : 'Free'}
+              </span>
+              {user.plan !== 'business' && (
+                <a href="/#pricing" style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: '5px',
+                  background: '#fbbf24',
+                  color: colors.darkGreen,
+                  textDecoration: 'none',
+                  cursor: 'pointer',
+                  fontFamily: dashFontFamily,
+                }}>Upgrade</a>
+              )}
+              <button style={styles.dashNavLogout} onClick={logout}>Logout</button>
+            </>}
+          </div>
+        </div>
+      </nav>
+      <div style={styles.container}>
+      <h1 style={styles.header}>Forest Analysis Dashboard</h1>
 
       {isDemo && <UpgradeBanner plan={user ? user.plan : null} />}
 
       {/* User Instructions Panel */}
-      <div style={{
-        ...styles.authSection,
-        marginBottom: '20px',
-        backgroundColor: '#f0f8ff'
-      }}>
+      <div style={styles.authSection}>
         <div style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -984,7 +1382,7 @@ const ForestBiomassApp = () => {
               border: 'none',
               cursor: 'pointer',
               fontSize: '20px',
-              color: '#007bff'
+              color: colors.lightGreen
             }}
             onClick={() => setShowInstructions(!showInstructions)}
           >
@@ -994,7 +1392,7 @@ const ForestBiomassApp = () => {
         
         {showInstructions && (
           <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
-            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>1. Authentication Setup</h4>
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>1. Authentication Setup</h4>
             <ul style={{ marginLeft: '20px' }}>
               <li><strong>Option A - Direct OAuth2:</strong> Register at <a href="https://dataspace.copernicus.eu/" target="_blank" rel="noreferrer">Copernicus Data Space</a> → Create OAuth2 client → Enter Client ID & Secret → Click "Authenticate"</li>
               <li><strong>Option B - Manual Token:</strong> If CORS blocks direct auth, enable "Use manual token mode" → Get token via POST request to:
@@ -1006,7 +1404,7 @@ const ForestBiomassApp = () => {
               <li>Token expires in 10 minutes - re-authenticate as needed</li>
             </ul>
 
-            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>2. Drawing Forest Polygons</h4>
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>2. Drawing Forest Polygons</h4>
             <ul style={{ marginLeft: '20px' }}>
               <li>Click the polygon tool (pentagon icon) in the map's top-left control panel</li>
               <li>Click on the map to place vertices of your forest boundary</li>
@@ -1016,7 +1414,7 @@ const ForestBiomassApp = () => {
               <li><strong>Important:</strong> Draw polygons over actual forested areas visible in satellite imagery for accurate results</li>
             </ul>
 
-            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>3. Forest Parameters</h4>
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>3. Forest Parameters</h4>
             <ul style={{ marginLeft: '20px' }}>
               <li><strong>Forest Type:</strong> Select species (Pine, Fir, Birch, Aspen) - affects growth curves and maximum biomass</li>
               <li><strong>Forest Age:</strong> Current age of the forest as of today. The app automatically calculates the age at the start of the 10-year analysis period. (Example: if planted in 2000, enter 25 for year 2025)</li>
@@ -1030,7 +1428,7 @@ const ForestBiomassApp = () => {
               </li>
             </ul>
 
-            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>4. Running Analysis</h4>
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>4. Running Analysis</h4>
             <ul style={{ marginLeft: '20px' }}>
               <li>After authentication and polygon drawing, click "Analyze with Process API"</li>
               <li>Processing retrieves all cloud-free Sentinel-2 acquisitions from summer months (June-August) for the past 10 years</li>
@@ -1038,7 +1436,7 @@ const ForestBiomassApp = () => {
               <li>Progress updates show current processing stage</li>
             </ul>
 
-            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>5. Interpreting Results</h4>
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>5. Interpreting Results</h4>
             <ul style={{ marginLeft: '20px' }}>
               <li><strong>NDVI (Normalized Difference Vegetation Index):</strong>
                 <ul>
@@ -1073,7 +1471,7 @@ const ForestBiomassApp = () => {
               </li>
             </ul>
 
-            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: '#0066cc' }}>6. Troubleshooting</h4>
+            <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>6. Troubleshooting</h4>
             <ul style={{ marginLeft: '20px' }}>
               <li><strong>Low NDVI values:</strong> Verify polygon is over forested area, not water/urban/agricultural land</li>
               <li><strong>No data found:</strong> Area may have persistent cloud cover - try different location</li>
@@ -1081,7 +1479,7 @@ const ForestBiomassApp = () => {
               <li><strong>CORS errors:</strong> Use manual token mode instead of direct authentication</li>
             </ul>
 
-            <p style={{ marginTop: '15px', padding: '10px', backgroundColor: '#e8f5e9', borderRadius: '4px' }}>
+            <p style={{ marginTop: '15px', padding: '10px', backgroundColor: '#ecfdf5', borderRadius: '4px' }}>
               <strong>💡 Tip:</strong> Start with a small test polygon (~10-50 hectares) to verify setup before analyzing larger areas. 
               Export results as CSV for further analysis in Excel or R/Python.
             </p>
@@ -1090,11 +1488,7 @@ const ForestBiomassApp = () => {
       </div>
 
       {/* Technical Documentation Panel */}
-      <div style={{
-        ...styles.authSection,
-        marginBottom: '20px',
-        backgroundColor: '#f5f5f5'
-      }}>
+      <div style={styles.authSection}>
         <div style={{
           display: 'flex',
           justifyContent: 'space-between',
@@ -1108,7 +1502,7 @@ const ForestBiomassApp = () => {
               border: 'none',
               cursor: 'pointer',
               fontSize: '20px',
-              color: '#007bff'
+              color: colors.lightGreen
             }}
             onClick={() => setShowDocumentation(!showDocumentation)}
           >
@@ -1121,7 +1515,7 @@ const ForestBiomassApp = () => {
             <h2 style={{ marginTop: '20px', marginBottom: '15px' }}>System Architecture Overview</h2>
             <p>This application integrates with the <strong>Copernicus Data Space Ecosystem</strong> to analyze Sentinel-2 satellite imagery for forest biomass estimation. It processes 10 years of historical data to track forest growth and health.</p>
 
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: '#0066cc' }}>1. Sentinel-2 Satellite & Spectral Bands</h3>
+            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>1. Sentinel-2 Satellite & Spectral Bands</h3>
             
             <h4>What is Sentinel-2?</h4>
             <ul style={{ marginLeft: '20px' }}>
@@ -1145,7 +1539,7 @@ SCL (Scene Classification Layer): Cloud/snow/water mask - 20m resolution`}
               <li>This contrast enables NDVI calculation</li>
             </ul>
 
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: '#0066cc' }}>2. NDVI (Normalized Difference Vegetation Index)</h3>
+            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>2. NDVI (Normalized Difference Vegetation Index)</h3>
             
             <h4>Formula:</h4>
             <pre style={styles.codeBlock}>
@@ -1168,7 +1562,7 @@ SCL (Scene Classification Layer): Cloud/snow/water mask - 20m resolution`}
               <li>The ratio normalizes for illumination differences</li>
             </ul>
 
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: '#0066cc' }}>3. Data Acquisition Pipeline</h3>
+            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>3. Data Acquisition Pipeline</h3>
 
             <h4>Authentication Flow:</h4>
             <pre style={styles.codeBlock}>
@@ -1225,7 +1619,7 @@ POST https://sh.dataspace.copernicus.eu/api/v1/process
               <li><strong>&gt; 20 km²</strong>: 300×300 pixels</li>
             </ul>
 
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: '#0066cc' }}>4. Cloud Masking with Scene Classification Layer (SCL)</h3>
+            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>4. Cloud Masking with Scene Classification Layer (SCL)</h3>
 
             <p>The app uses Sentinel-2's SCL band to filter out unreliable pixels:</p>
 
@@ -1242,7 +1636,7 @@ SCL_NOT_VEGETATED = 5   // Bare soil
 SCL_WATER = 6          // Water (for contrast)`}
             </pre>
 
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: '#0066cc' }}>5. Biomass Estimation Model</h3>
+            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>5. Biomass Estimation Model</h3>
 
             <h4>Logistic Growth Model:</h4>
             <pre style={styles.codeBlock}>
@@ -1271,7 +1665,7 @@ Birch: Max 300 t/ha, growth rate 0.12/year, NDVI saturation 0.82
 Aspen: Max 250 t/ha, growth rate 0.15/year, NDVI saturation 0.80`}
             </pre>
 
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: '#0066cc' }}>6. Time Series Processing</h3>
+            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>6. Time Series Processing</h3>
 
             <h4>Data Collection Strategy:</h4>
             <ul style={{ marginLeft: '20px' }}>
@@ -1290,7 +1684,7 @@ Aspen: Max 250 t/ha, growth rate 0.15/year, NDVI saturation 0.80`}
 // - Residual thin clouds`}
             </pre>
 
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: '#0066cc' }}>7. GeoTIFF Processing</h3>
+            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>7. GeoTIFF Processing</h3>
 
             <p>The app receives NDVI data as 32-bit floating-point GeoTIFF:</p>
 
@@ -1307,7 +1701,7 @@ const rasters = await image.readRasters();
 const ndviArray = rasters[0];  // Float32Array`}
             </pre>
 
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: '#0066cc' }}>8. Key Technical Features</h3>
+            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>8. Key Technical Features</h3>
 
             <h4>Coordinate System Handling:</h4>
             <ul style={{ marginLeft: '20px' }}>
@@ -1332,7 +1726,7 @@ const ndviArray = rasters[0];  // Float32Array`}
               <li><strong>Rolling averages</strong>: Smoothed trends</li>
             </ul>
 
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: '#0066cc' }}>9. Common Customer Questions & Answers</h3>
+            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>9. Common Customer Questions & Answers</h3>
 
             <p><strong>Q: How accurate is the biomass estimation?</strong><br/>
             A: Typical accuracy is ±20-30% compared to field measurements. NDVI-based estimates are most accurate for relative changes rather than absolute values.</p>
@@ -1352,7 +1746,7 @@ const ndviArray = rasters[0];  // Float32Array`}
             <p><strong>Q: Processing time expectations?</strong><br/>
             A: 3-10 minutes for full 10-year analysis, depending on polygon size and available acquisitions.</p>
 
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: '#0066cc' }}>10. Data Validation & Error Handling</h3>
+            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>10. Data Validation & Error Handling</h3>
 
             <p>The system includes multiple validation layers:</p>
             <ul style={{ marginLeft: '20px' }}>
@@ -1363,7 +1757,7 @@ const ndviArray = rasters[0];  // Float32Array`}
               <li>Token expiration monitoring</li>
             </ul>
 
-            <p style={{ marginTop: '20px', padding: '10px', backgroundColor: '#e8f5e9', borderRadius: '4px' }}>
+            <p style={{ marginTop: '20px', padding: '10px', backgroundColor: '#ecfdf5', borderRadius: '4px' }}>
               This comprehensive system provides scientifically-grounded forest monitoring using free, open satellite data with regular updates every few days during growing season.
             </p>
           </div>
@@ -1393,21 +1787,134 @@ const ndviArray = rasters[0];  // Float32Array`}
         <div>
           <label style={styles.label}>Current Forest Age (years)</label>
           <input
-            style={styles.input}
+            style={{ ...styles.input, ...(estimateAgeMode ? { opacity: 0.5 } : {}) }}
             type="number"
             min="11"
             max="100"
-            value={forestAge}
+            value={estimateAgeMode && ageEstimate ? ageEstimate.estimatedAge : forestAge}
             onChange={(e) => setForestAge(parseInt(e.target.value) || 20)}
+            disabled={estimateAgeMode}
+            placeholder={estimateAgeMode ? '--' : undefined}
             title="Enter the current age of the forest (e.g., if planted in 2000, enter 25 for year 2025)"
           />
           <p style={{ fontSize: '12px', color: '#666', margin: '5px 0 0 0' }}>
             Enter age as of {new Date().getFullYear()}. Analysis covers the last 10 years. (Min: 11 years)
           </p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', fontSize: '13px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={estimateAgeMode}
+              onChange={(e) => {
+                setEstimateAgeMode(e.target.checked);
+                if (!e.target.checked) {
+                  setAgeEstimate(null);
+                }
+              }}
+            />
+            Estimate age from satellite data
+          </label>
+          {estimateAgeMode && !ageEstimate && (
+            <p style={{ fontSize: '12px', color: '#888', margin: '4px 0 0 0', fontStyle: 'italic' }}>
+              Age will be estimated after analysis
+            </p>
+          )}
+          {ageEstimate && (
+            <div style={{ marginTop: '8px', padding: '10px', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '13px' }}>
+              <strong>Estimated age: {ageEstimate.estimatedAge} years</strong>{' '}
+              (range: {ageEstimate.range[0]}–{ageEstimate.range[1]}, {ageEstimate.confidence} confidence)
+              <br />
+              <span style={{ color: '#666', fontSize: '12px' }}>
+                Based on {ageEstimate.yearlyPeaks.length}-year NDVI trend (slope: {ageEstimate.observedSlope.toFixed(4)}/yr)
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
-      <div style={styles.mapContainer}>
+      {user && !isDemo && (
+        <div data-pdf-exclude style={{
+          backgroundColor: colors.white,
+          borderRadius: '12px',
+          border: `1px solid ${colors.gray200}`,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+          marginBottom: '20px',
+          overflow: 'hidden',
+        }}>
+          <div
+            onClick={() => setShowSavedForests(!showSavedForests)}
+            style={{
+              padding: '15px 20px',
+              cursor: 'pointer',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontWeight: 600,
+              fontSize: '14px',
+              color: colors.darkGreen,
+            }}
+          >
+            <span>My Saved Forests ({savedForests.length})</span>
+            <span style={{ fontSize: '12px', color: colors.gray500 }}>{showSavedForests ? '▲ Collapse' : '▼ Expand'}</span>
+          </div>
+          {showSavedForests && (
+            <div style={{ padding: '0 20px 20px' }}>
+              {savedForests.length === 0 ? (
+                <p style={{ color: colors.gray500, fontSize: '13px', margin: 0 }}>
+                  No saved forests yet. Analyze a forest and click Save to save it.
+                </p>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                  {savedForests.map(sf => (
+                    <div
+                      key={sf.id}
+                      onClick={() => loadSavedForest(sf.id)}
+                      style={{
+                        ...styles.infoCard,
+                        cursor: 'pointer',
+                        border: loadedForestId === sf.id ? `2px solid #3b82f6` : `1px solid ${colors.gray200}`,
+                        position: 'relative',
+                      }}
+                    >
+                      <button
+                        onClick={(e) => deleteSavedForest(sf.id, e)}
+                        style={{
+                          position: 'absolute', top: '8px', right: '8px',
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          fontSize: '16px', color: colors.gray500, padding: '2px 6px',
+                        }}
+                        title="Delete forest"
+                      >&times;</button>
+                      <h4 style={{ margin: '0 0 6px', fontSize: '14px', color: colors.darkGreen, paddingRight: '20px' }}>{sf.name}</h4>
+                      <p style={{ margin: '2px 0', fontSize: '12px', color: colors.gray500 }}>
+                        {sf.forest_type} · {sf.area_hectares ? `${Number(sf.area_hectares).toFixed(1)}ha` : 'N/A'}
+                      </p>
+                      <p style={{ margin: '2px 0', fontSize: '11px', color: colors.gray500 }}>
+                        Saved {new Date(sf.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {user && isDemo && (
+        <div data-pdf-exclude style={{
+          padding: '12px 20px',
+          backgroundColor: colors.gray100,
+          borderRadius: '12px',
+          border: `1px solid ${colors.gray200}`,
+          marginBottom: '20px',
+          fontSize: '13px',
+          color: colors.gray500,
+        }}>
+          Save & load forests — <a href="/app" onClick={(e) => { e.preventDefault(); }} style={{ color: colors.medGreen, fontWeight: 600 }}>Upgrade to Pro</a>
+        </div>
+      )}
+
+      <div data-pdf-section="Map" style={styles.mapContainer}>
         <MapContainer
           center={[61.086011, 24.065087]}
           zoom={12}
@@ -1439,22 +1946,71 @@ const ndviArray = rasters[0];  // Float32Array`}
               />
             ))}
           </FeatureGroup>
+          {savedForests.map(sf => {
+            if (sf.id === loadedForestId) return null;
+            try {
+              const geo = typeof sf.polygon_geojson === 'string' ? JSON.parse(sf.polygon_geojson) : sf.polygon_geojson;
+              const positions = geo.coordinates[0].map(c => [c[1], c[0]]);
+              return (
+                <Polygon
+                  key={`saved-${sf.id}`}
+                  positions={positions}
+                  pathOptions={{
+                    color: '#3b82f6',
+                    weight: 2,
+                    opacity: 0.7,
+                    fillOpacity: 0.1,
+                    dashArray: '8 4',
+                  }}
+                  eventHandlers={{ click: () => loadSavedForest(sf.id) }}
+                >
+                  <LeafletTooltip>{sf.name}</LeafletTooltip>
+                </Polygon>
+              );
+            } catch { return null; }
+          })}
         </MapContainer>
       </div>
 
-      <button
-        style={{
-          ...styles.button,
-          ...(loading || selectedForests.length === 0 ? styles.buttonDisabled : {})
-        }}
-        onClick={isDemo ? loadDemoData : fetchSatelliteData}
-        disabled={loading || (selectedForests.length === 0 && !isDemo)}
-      >
-        {loading ? 'Processing Satellite Data...' : isDemo ? 'Load Demo Analysis' : 'Analyze with Sentinel-2 Process API'}
-      </button>
+      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+        <button
+          style={{
+            ...styles.button,
+            ...(loading || selectedForests.length === 0 ? styles.buttonDisabled : {})
+          }}
+          onClick={isDemo ? loadDemoData : fetchSatelliteData}
+          disabled={loading || (selectedForests.length === 0 && !isDemo)}
+        >
+          {loading ? 'Processing Satellite Data...' : isDemo ? 'Load Demo Analysis' : 'Analyze with Sentinel-2 Process API'}
+        </button>
+        {loading && !isDemo && (
+          <button
+            style={{
+              ...styles.button,
+              backgroundColor: '#dc2626',
+            }}
+            onClick={cancelProcessing}
+          >
+            Cancel
+          </button>
+        )}
+        {!isDemo && biomassData.length > 0 && selectedForests.length > 0 && (
+          <button
+            style={{
+              ...styles.button,
+              backgroundColor: colors.medGreen,
+              ...(savingForest ? styles.buttonDisabled : {}),
+            }}
+            onClick={saveCurrentForest}
+            disabled={savingForest}
+          >
+            {savingForest ? 'Saving...' : 'Save Forest'}
+          </button>
+        )}
+      </div>
 
       {!loading && biomassData.length > 0 && (
-        <p style={{ fontSize: '12px', marginTop: '10px', padding: '10px', backgroundColor: '#f0f8ff', borderRadius: '4px' }}>
+        <p style={{ fontSize: '12px', marginTop: '10px', padding: '10px', backgroundColor: colors.white, borderRadius: '12px', border: `1px solid ${colors.gray200}`, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
           <strong>Processing Summary:</strong> Analyzed {biomassData.length} Sentinel-2 acquisitions over {((new Date(biomassData[biomassData.length - 1].date) - new Date(biomassData[0].date)) / 31536000000).toFixed(1)} years
           with {(biomassData.reduce((sum, d) => sum + parseFloat(d.coverage), 0) / biomassData.length).toFixed(1)}% average cloud-free coverage.
           Biomass increased from {biomassData[0].biomass.toFixed(1)} to {biomassData[biomassData.length - 1].biomass.toFixed(1)} tons/ha,
@@ -1463,7 +2019,7 @@ const ndviArray = rasters[0];  // Float32Array`}
       )}
 
       {selectedForests.length > 0 && (
-        <div style={styles.forestInfo}>
+        <div data-pdf-section="Forest Info" style={styles.forestInfo}>
           {selectedForests.map((forest, idx) => (
             <div
               key={forest.id}
@@ -1477,7 +2033,7 @@ const ndviArray = rasters[0];  // Float32Array`}
               <h3>Forest #{idx + 1}</h3>
               <p><strong>Type:</strong> {forest.type}</p>
               <p><strong>Area:</strong> {forest.area} hectares</p>
-              <p><strong>Current Age:</strong> {forestAge} years</p>
+              <p><strong>Current Age:</strong> {estimateAgeMode ? (ageEstimate ? `${ageEstimate.estimatedAge} years (estimated)` : 'Pending estimation...') : `${forestAge} years`}</p>
             </div>
           ))}
         </div>
@@ -1491,7 +2047,7 @@ const ndviArray = rasters[0];  // Float32Array`}
       )}
 
       {biomassData.length > 0 && (
-        <div style={styles.chartContainer}>
+        <div data-pdf-section="Chart" style={styles.chartContainer}>
           <div style={styles.buttonContainer}>
             <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>Satellite Data: NDVI & Biomass Trends <InfoButton id="mainChart" showInfo={showInfo} setShowInfo={setShowInfo}>
                 NDVI (Normalized Difference Vegetation Index) measures greenness from satellite red and near-infrared bands: (NIR − Red) / (NIR + Red), range 0–1. NDMI (Normalized Difference Moisture Index) measures canopy water content from NIR and SWIR bands. NDRE (Normalized Difference Red Edge) detects chlorophyll density from red-edge and NIR bands. Biomass is estimated from NDVI using a species-specific logistic growth model: biomass = youngBiomass + (maxBiomass − youngBiomass) × (1 − e<sup>−growthRate × age</sup>) × (NDVI / saturationNDVI). Rolling averages use a 7-observation window to smooth noise.
@@ -1503,6 +2059,23 @@ const ndviArray = rasters[0];  // Float32Array`}
             >
               Export CSV
             </button>
+            {user && user.plan === 'business' ? (
+              <button
+                style={{ ...styles.exportButton, backgroundColor: colors.darkGreen }}
+                onClick={exportToPdf}
+                title="Export full report as PDF"
+              >
+                Export PDF
+              </button>
+            ) : (
+              <button
+                style={{ ...styles.exportButton, backgroundColor: '#9ca3af', cursor: 'not-allowed' }}
+                disabled
+                title="PDF export requires Business plan"
+              >
+                Export PDF
+              </button>
+            )}
           </div>
 
           <ResponsiveContainer width="100%" height={400}>
@@ -1614,9 +2187,9 @@ const ndviArray = rasters[0];  // Float32Array`}
             <h3>Technical Implementation & Results</h3>
 
             {biomassData.length > 0 && (
-              <>
-                <h4>1. Current Analysis Metrics</h4>
-                <div style={{ backgroundColor: '#e8f4f8', padding: '15px', borderRadius: '6px', marginBottom: '20px' }}>
+              <div data-pdf-section="Analysis Metrics">
+                <h4 style={styles.moduleHeading}>1. Current Analysis Metrics</h4>
+                <div style={styles.moduleCard}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px', fontSize: '13px' }}>
                     <div>
                       <strong>Temporal Coverage</strong>
@@ -1664,13 +2237,13 @@ const ndviArray = rasters[0];  // Float32Array`}
                     </div>
                   </div>
                 </div>
-              </>
+              </div>
             )}
 
             {treeEstimate && (
-              <>
-                <h4>2. Estimated Tree Count</h4>
-                <div style={{ backgroundColor: '#e8f8e8', padding: '15px', borderRadius: '6px', marginBottom: '20px' }}>
+              <div data-pdf-section="Tree Count">
+                <h4 style={styles.moduleHeading}>2. Estimated Tree Count</h4>
+                <div style={{ ...styles.moduleCard, borderLeft: `4px solid ${colors.lightGreen}` }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px', fontSize: '13px' }}>
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>Tree Density Estimate</strong> <InfoButton id="treeDensity" showInfo={showInfo} setShowInfo={setShowInfo}>
@@ -1695,16 +2268,16 @@ const ndviArray = rasters[0];  // Float32Array`}
                       </ul>
                     </div>
                   </div>
-                  <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
+                  <p style={styles.moduleFootnote}>
                     Estimated using forestry allometric models (crown diameter × canopy cover). Sentinel-2 at 10m resolution
                     cannot resolve individual trees — this is a statistical estimate based on species, age, and NDVI-derived canopy cover (±30% uncertainty).
                   </p>
                 </div>
-              </>
+              </div>
             )}
 
             {biomassData.length > 0 && (
-              <>
+              <div data-pdf-section="Timber Value">
                 <h4>3. Timber Value & Harvest Analysis</h4>
                 <CarbonDashboard
                   biomassData={biomassData}
@@ -1714,7 +2287,7 @@ const ndviArray = rasters[0];  // Float32Array`}
                   showInfo={showInfo}
                   setShowInfo={setShowInfo}
                 />
-              </>
+              </div>
             )}
 
             {/* 3b. Timber Market & Pricing */}
@@ -1726,42 +2299,42 @@ const ndviArray = rasters[0];  // Float32Array`}
               const harvestDelay = analyzeHarvestDelay(currentType, forestAge, currentArea);
 
               return (
-                <>
-                  <h4>3b. Timber Market & Pricing</h4>
-                  <div style={{ backgroundColor: '#fef9e7', padding: '15px', borderRadius: '6px', marginBottom: '20px', border: '1px solid #f0e68c' }}>
+                <div data-pdf-section="Timber Market">
+                  <h4 style={styles.moduleHeading}>3b. Timber Market & Pricing</h4>
+                  <div style={{ ...styles.moduleCard, borderLeft: '4px solid #d97706' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '15px' }}>
-                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                      <div style={styles.statCard}>
+                        <div style={styles.statLabel}>
                           Price Range (Delivery)
                           <InfoButton id="marketPriceRange" showInfo={showInfo} setShowInfo={setShowInfo}>
                             Low/Avg/High delivery-sale prices based on Luke 2024 price statistics across Finnish timber buyers. Delivery sale = you handle harvesting and transport to mill. Includes sawlog, pulpwood, and energy wood volumes.
                           </InfoButton>
                         </div>
-                        <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#8b6914', margin: '6px 0' }}>
+                        <div style={styles.statValue}>
                           €{priceRange.avg.toFixed(0)}
                         </div>
-                        <div style={{ fontSize: '11px', color: '#888' }}>
+                        <div style={{ fontSize: '11px', color: colors.gray500 }}>
                           €{priceRange.low.toFixed(0)} — €{priceRange.high.toFixed(0)}
                         </div>
                       </div>
 
-                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                      <div style={styles.statCard}>
+                        <div style={styles.statLabel}>
                           Standing Sale
                           <InfoButton id="marketStanding" showInfo={showInfo} setShowInfo={setShowInfo}>
                             Standing (pystykauppa) sale price = delivery price × {(STANDING_SALE_DISCOUNT * 100).toFixed(0)}%. Buyer handles all harvesting and transport. Lower price but zero work and risk for seller. Most common sale type in Finland.
                           </InfoButton>
                         </div>
-                        <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#8b6914', margin: '6px 0' }}>
+                        <div style={styles.statValue}>
                           €{priceRange.standingSaleAvg.toFixed(0)}
                         </div>
-                        <div style={{ fontSize: '11px', color: '#888' }}>
+                        <div style={{ fontSize: '11px', color: colors.gray500 }}>
                           €{priceRange.standingSaleLow.toFixed(0)} — €{priceRange.standingSaleHigh.toFixed(0)}
                         </div>
                       </div>
 
-                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                      <div style={styles.statCard}>
+                        <div style={styles.statLabel}>
                           Volume Breakdown
                           <InfoButton id="marketVolume" showInfo={showInfo} setShowInfo={setShowInfo}>
                             Timber split into sawlog (high-value logs for lumber), pulpwood (for paper/board), and energy wood (branches, tops, small-diameter). Sawlog fraction increases with forest age — older forests produce more valuable timber.
@@ -1800,22 +2373,22 @@ const ndviArray = rasters[0];  // Float32Array`}
                         <Line type="monotone" dataKey="discounted" stroke="#e67e22" strokeWidth={2} strokeDasharray="4 4" name="Discounted (3%)" />
                       </LineChart>
                     </ResponsiveContainer>
-                    <p style={{ fontSize: '11px', color: '#666', margin: '5px 0 0 0', fontStyle: 'italic' }}>
+                    <p style={styles.moduleFootnote}>
                       Prices based on Luke 2024 Finnish timber price statistics. UPM, Stora Enso, and Metsä Group control ~80% of purchases — compare offers from multiple buyers.
                     </p>
                   </div>
-                </>
+                </div>
               );
             })()}
 
             {healthEstimate && (
-              <>
-                <h4>4. Forest Health Assessment</h4>
+              <div data-pdf-section="Forest Health">
+                <h4 style={styles.moduleHeading}>4. Forest Health Assessment</h4>
                 <div style={{
-                  backgroundColor: healthEstimate.healthScore > 80 ? '#e8f8e8' :
-                    healthEstimate.healthScore > 60 ? '#fef9e7' :
-                    healthEstimate.healthScore > 40 ? '#fdedec' : '#f8d7da',
-                  padding: '15px', borderRadius: '6px', marginBottom: '20px'
+                  ...styles.moduleCard,
+                  borderLeft: `4px solid ${healthEstimate.healthScore > 80 ? '#27ae60' :
+                    healthEstimate.healthScore > 60 ? '#f39c12' :
+                    healthEstimate.healthScore > 40 ? '#e67e22' : '#e74c3c'}`
                 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px', fontSize: '13px' }}>
                     <div>
@@ -2013,21 +2586,21 @@ const ndviArray = rasters[0];  // Float32Array`}
                     );
                   })()}
 
-                  <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
+                  <p style={styles.moduleFootnote}>
                     Health assessment based on NDVI, NDMI (moisture), and NDRE (red edge) spectral indices from Sentinel-2.
                     Probable causes are matched from species-specific vulnerability profiles — field verification is recommended for confirmation.
                   </p>
                 </div>
-              </>
+              </div>
             )}
 
             {biodiversityEstimate && (
-              <>
-                <h4>5. Biodiversity Assessment</h4>
+              <div data-pdf-section="Biodiversity">
+                <h4 style={styles.moduleHeading}>5. Biodiversity Assessment</h4>
                 <div style={{
-                  backgroundColor: biodiversityEstimate.overallScore > 70 ? '#e8f8e8' :
-                    biodiversityEstimate.overallScore > 50 ? '#fef9e7' : '#fdedec',
-                  padding: '15px', borderRadius: '6px', marginBottom: '20px'
+                  ...styles.moduleCard,
+                  borderLeft: `4px solid ${biodiversityEstimate.overallScore > 70 ? '#27ae60' :
+                    biodiversityEstimate.overallScore > 50 ? '#f39c12' : '#e74c3c'}`
                 }}>
                   <div style={{ textAlign: 'center', marginBottom: '15px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
@@ -2054,30 +2627,30 @@ const ndviArray = rasters[0];  // Float32Array`}
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '15px' }}>
-                    <div style={{ backgroundColor: 'rgba(255,255,255,0.6)', padding: '10px', borderRadius: '6px', textAlign: 'center' }}>
-                      <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>Structural Diversity <InfoButton id="bioStructural" showInfo={showInfo} setShowInfo={setShowInfo}>
+                    <div style={styles.statCard}>
+                      <div style={styles.statLabel}>Structural Diversity <InfoButton id="bioStructural" showInfo={showInfo} setShowInfo={setShowInfo}>
                         Measures canopy heterogeneity from NDVI variance across the polygon (40% weight), canopy cover optimality — 60-85% is ideal as it provides both shelter and light gaps (30%), and crown diameter maturity (30%). Higher variation = more microhabitats.
                       </InfoButton></div>
-                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2c3e50' }}>{biodiversityEstimate.structuralDiversity}</div>
+                      <div style={styles.statValue}>{biodiversityEstimate.structuralDiversity}</div>
                     </div>
-                    <div style={{ backgroundColor: 'rgba(255,255,255,0.6)', padding: '10px', borderRadius: '6px', textAlign: 'center' }}>
-                      <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>Species Composition <InfoButton id="bioSpecies" showInfo={showInfo} setShowInfo={setShowInfo}>
+                    <div style={styles.statCard}>
+                      <div style={styles.statLabel}>Species Composition <InfoButton id="bioSpecies" showInfo={showInfo} setShowInfo={setShowInfo}>
                         Satellite data cannot reliably detect species mix from a single forest type polygon. Finnish forests with 3+ tree species score significantly higher in biodiversity surveys (Vanha-Majamaa & Jalonen, 2001). A field survey or multi-spectral species classification would be needed for a real score.
                       </InfoButton></div>
-                      <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#999' }}>N/A</div>
-                      <div style={{ fontSize: '10px', color: '#aaa' }}>Requires field survey</div>
+                      <div style={{ fontSize: '16px', fontWeight: 'bold', color: colors.gray500 }}>N/A</div>
+                      <div style={{ fontSize: '10px', color: colors.gray500 }}>Requires field survey</div>
                     </div>
-                    <div style={{ backgroundColor: 'rgba(255,255,255,0.6)', padding: '10px', borderRadius: '6px', textAlign: 'center' }}>
-                      <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>Age/Maturity <InfoButton id="bioAge" showInfo={showInfo} setShowInfo={setShowInfo}>
+                    <div style={styles.statCard}>
+                      <div style={styles.statLabel}>Age/Maturity <InfoButton id="bioAge" showInfo={showInfo} setShowInfo={setShowInfo}>
                         Ratio of current age to species mature age (pine 80yr, fir 90yr, birch 60yr, aspen 50yr). Older forests develop more structural complexity, deadwood, and ecological niches for epiphytes, cavity-nesting birds, and saproxylic insects.
                       </InfoButton></div>
-                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2c3e50' }}>{biodiversityEstimate.ageFactor}</div>
+                      <div style={styles.statValue}>{biodiversityEstimate.ageFactor}</div>
                     </div>
-                    <div style={{ backgroundColor: 'rgba(255,255,255,0.6)', padding: '10px', borderRadius: '6px', textAlign: 'center' }}>
-                      <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>Deadwood Potential <InfoButton id="bioDeadwood" showInfo={showInfo} setShowInfo={setShowInfo}>
+                    <div style={styles.statCard}>
+                      <div style={styles.statLabel}>Deadwood Potential <InfoButton id="bioDeadwood" showInfo={showInfo} setShowInfo={setShowInfo}>
                         Deadwood is critical for ~25% of forest species in Finland. Estimated from forest age (older forests have more natural mortality) and NDVI spatial variance (indicates structural heterogeneity). "Likely" if age {'>'} species deadwood age and high NDVI variance. Deadwood ages: pine 100yr, fir 110yr, birch 70yr, aspen 60yr.
                       </InfoButton></div>
-                      <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#2c3e50' }}>{biodiversityEstimate.deadwood}</div>
+                      <div style={styles.statValue}>{biodiversityEstimate.deadwood}</div>
                     </div>
                   </div>
 
@@ -2092,13 +2665,13 @@ const ndviArray = rasters[0];  // Float32Array`}
                     </div>
                   )}
 
-                  <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
+                  <p style={styles.moduleFootnote}>
                     Biodiversity assessment is based on remote sensing indicators and forestry models — not a field survey.
                     Species composition is conservatively scored as monoculture since we cannot detect mixed species from satellite data alone.
                     For accurate biodiversity assessment, on-site surveys are recommended.
                   </p>
                 </div>
-              </>
+              </div>
             )}
 
             {/* 6. EUDR Compliance */}
@@ -2112,9 +2685,9 @@ const ndviArray = rasters[0];  // Float32Array`}
               const report = generateComplianceReport(biomassData, coords, currentType, currentArea);
 
               return (
-                <>
-                  <h4>6. EUDR Compliance</h4>
-                  <div style={{ backgroundColor: '#f8f9fa', padding: '15px', borderRadius: '6px', marginBottom: '20px', border: `2px solid ${riskAssessment.riskColor}` }}>
+                <div data-pdf-section="EUDR Compliance">
+                  <h4 style={styles.moduleHeading}>6. EUDR Compliance</h4>
+                  <div style={{ ...styles.moduleCard, borderLeft: `4px solid ${riskAssessment.riskColor}` }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '15px' }}>
                       <div style={{ textAlign: 'center' }}>
                         <div style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
@@ -2196,11 +2769,11 @@ const ndviArray = rasters[0];  // Float32Array`}
                       </div>
                     )}
 
-                    <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
+                    <p style={styles.moduleFootnote}>
                       This is a satellite-based screening tool for early risk assessment — not a compliance certificate. Formal EUDR compliance requires a Due Diligence Statement (DDS) submitted through the EU Information System, including geo-located supply chain data and operator-level documentation per Regulation (EU) 2023/1115.
                     </p>
                   </div>
-                </>
+                </div>
               );
             })()}
 
@@ -2222,31 +2795,31 @@ const ndviArray = rasters[0];  // Float32Array`}
               const tradeoff = compareProtectionVsHarvest(timberVal.totalValue, permanentComp.lumpSum, creditVal.totalValue);
 
               return (
-                <>
-                  <h4>7. Conservation & Subsidies</h4>
-                  <div style={{ backgroundColor: '#eaf5ea', padding: '15px', borderRadius: '6px', marginBottom: '20px', border: '1px solid #c3e6cb' }}>
+                <div data-pdf-section="Conservation">
+                  <h4 style={styles.moduleHeading}>7. Conservation & Subsidies</h4>
+                  <div style={{ ...styles.moduleCard, borderLeft: `4px solid ${colors.medGreen}` }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '15px' }}>
-                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '11px', color: '#155724', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                      <div style={styles.statCard}>
+                        <div style={styles.statLabel}>
                           METSO Class
                           <InfoButton id="metsoClass" showInfo={showInfo} setShowInfo={setShowInfo}>
                             METSO is Finland's voluntary forest conservation programme (€21.7M available). Class I = highest conservation value (old-growth, high biodiversity). Class II = significant value. Class III = potential value with restoration. Classification based on forest age and biodiversity score thresholds specific to each tree species.
                           </InfoButton>
                         </div>
-                        <div style={{ fontSize: '28px', fontWeight: 'bold', color: metso.eligible ? '#27ae60' : '#888', margin: '6px 0' }}>
+                        <div style={{ ...styles.statValue, fontSize: '28px', color: metso.eligible ? '#27ae60' : colors.gray500 }}>
                           {metso.metsoClass ? `Class ${metso.metsoClass}` : 'Not Eligible'}
                         </div>
-                        <div style={{ fontSize: '11px', color: '#555' }}>{metso.label}</div>
+                        <div style={{ fontSize: '11px', color: colors.gray700 }}>{metso.label}</div>
                         {metso.nextClassRequirements && (
-                          <div style={{ fontSize: '10px', color: '#888', marginTop: '4px' }}>
+                          <div style={{ fontSize: '10px', color: colors.gray500, marginTop: '4px' }}>
                             Next: Class {metso.nextClassRequirements.targetClass}
                             {metso.nextClassRequirements.ageNeeded > 0 && ` (${metso.nextClassRequirements.ageNeeded}yr more)`}
                           </div>
                         )}
                       </div>
 
-                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '11px', color: '#155724', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                      <div style={styles.statCard}>
+                        <div style={styles.statLabel}>
                           Compensation Value
                           <InfoButton id="metsoComp" showInfo={showInfo} setShowInfo={setShowInfo}>
                             METSO compensation: permanent protection pays 100% of timber value as lump sum. 20-year temporary protection pays 70% upfront plus annual management payment (~2%/yr). Compensation is tax-free for permanent protection under certain conditions.
@@ -2255,12 +2828,12 @@ const ndviArray = rasters[0];  // Float32Array`}
                         <div style={{ fontSize: '13px', margin: '6px 0', lineHeight: '1.8' }}>
                           <div>Permanent: <strong style={{ color: '#27ae60' }}>€{permanentComp.lumpSum.toFixed(0)}</strong></div>
                           <div>20yr temp: <strong style={{ color: '#f39c12' }}>€{temporaryComp.totalOver20Years.toFixed(0)}</strong></div>
-                          <div style={{ fontSize: '10px', color: '#888' }}>({temporaryComp.description})</div>
+                          <div style={{ fontSize: '10px', color: colors.gray500 }}>({temporaryComp.description})</div>
                         </div>
                       </div>
 
-                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '11px', color: '#155724', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                      <div style={styles.statCard}>
+                        <div style={styles.statLabel}>
                           NRL Status
                           <InfoButton id="nrlStatus" showInfo={showInfo} setShowInfo={setShowInfo}>
                             EU Nature Restoration Law targets for boreal forests: deadwood ≥20 m³/ha, retention trees ≥10/ha at harvest, uneven-aged structure. Deadwood is estimated from forest age and standing volume. Young managed forests typically have deadwood deficits.
@@ -2269,11 +2842,11 @@ const ndviArray = rasters[0];  // Float32Array`}
                         <div style={{ fontSize: '18px', fontWeight: 'bold', color: nrl.overallStatus === 'Compliant' ? '#27ae60' : '#f39c12', margin: '6px 0' }}>
                           {nrl.overallStatus}
                         </div>
-                        <div style={{ fontSize: '11px', color: '#555' }}>
+                        <div style={{ fontSize: '11px', color: colors.gray700 }}>
                           {nrl.compliantCount}/{nrl.totalTargets} targets met
                         </div>
                         {nrl.targets.filter(t => t.gap).map((t, i) => (
-                          <div key={i} style={{ fontSize: '10px', color: '#e67e22', marginTop: '2px' }}>{t.name}: {t.gap}</div>
+                          <div key={i} style={{ fontSize: '10px', color: '#d97706', marginTop: '2px' }}>{t.name}: {t.gap}</div>
                         ))}
                       </div>
                     </div>
@@ -2317,11 +2890,11 @@ const ndviArray = rasters[0];  // Float32Array`}
                       </div>
                     )}
 
-                    <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
+                    <p style={styles.moduleFootnote}>
                       METSO eligibility is indicative — actual classification requires ELY Centre site assessment. NRL targets based on EU Nature Restoration Law proposal for boreal forests.
                     </p>
                   </div>
-                </>
+                </div>
               );
             })()}
 
@@ -2349,31 +2922,31 @@ const ndviArray = rasters[0];  // Float32Array`}
               }));
 
               return (
-                <>
-                  <h4>8. Succession Planning</h4>
-                  <div style={{ backgroundColor: '#f5f0ff', padding: '15px', borderRadius: '6px', marginBottom: '20px', border: '1px solid #d5c8f0' }}>
+                <div data-pdf-section="Succession Planning">
+                  <h4 style={styles.moduleHeading}>8. Succession Planning</h4>
+                  <div style={{ ...styles.moduleCard, borderLeft: '4px solid #7c3aed' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '15px' }}>
-                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '11px', color: '#5b3a8c', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                      <div style={styles.statCard}>
+                        <div style={styles.statLabel}>
                           Total Asset Value
                           <InfoButton id="succAsset" showInfo={showInfo} setShowInfo={setShowInfo}>
                             Total estate value = land + forest use value. Timber and carbon credits are mutually exclusive — you either harvest (timber) or keep standing (carbon credits), so the higher of the two is used. Land value uses Southern Finland average (€{LAND_VALUE_PER_HA.south}/ha, Tax Authority 2024).
                           </InfoButton>
                         </div>
-                        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#5b3a8c', margin: '6px 0' }}>
+                        <div style={styles.statValue}>
                           €{assetSummary.totalValue.toLocaleString()}
                         </div>
-                        <div style={{ fontSize: '11px', color: '#888' }}>€{assetSummary.perHectare.toLocaleString()}/ha</div>
-                        <div style={{ fontSize: '10px', color: '#aaa', marginTop: '4px' }}>
+                        <div style={{ fontSize: '11px', color: colors.gray500 }}>€{assetSummary.perHectare.toLocaleString()}/ha</div>
+                        <div style={{ fontSize: '10px', color: colors.gray500, marginTop: '4px' }}>
                           Land {assetSummary.breakdown.landPercent}% / {assetSummary.betterUse === 'timber' ? 'Timber' : 'Carbon'} {assetSummary.breakdown.forestUsePercent}%
                         </div>
-                        <div style={{ fontSize: '10px', color: '#aaa' }}>
+                        <div style={{ fontSize: '10px', color: colors.gray500 }}>
                           Timber €{assetSummary.timberValue.toLocaleString()} vs Carbon €{assetSummary.carbonCreditValue.toLocaleString()}
                         </div>
                       </div>
 
-                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '11px', color: '#5b3a8c', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                      <div style={styles.statCard}>
+                        <div style={styles.statLabel}>
                           Inheritance Tax (Class I)
                           <InfoButton id="succTax" showInfo={showInfo} setShowInfo={setShowInfo}>
                             <div>Finnish inheritance tax for Class I heirs (children, spouse).</div>
@@ -2390,19 +2963,19 @@ const ndviArray = rasters[0];  // Float32Array`}
                             </div>
                           </InfoButton>
                         </div>
-                        <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#e74c3c', margin: '6px 0' }}>
+                        <div style={{ ...styles.statValue, color: '#e74c3c' }}>
                           €{inheritanceTax.tax.toLocaleString()}
                         </div>
-                        <div style={{ fontSize: '11px', color: '#888' }}>
+                        <div style={{ fontSize: '11px', color: colors.gray500 }}>
                           {inheritanceTax.effectiveRate.toFixed(1)}% of fair market value
                         </div>
-                        <div style={{ fontSize: '10px', color: '#aaa', marginTop: '4px' }}>
+                        <div style={{ fontSize: '10px', color: colors.gray500, marginTop: '4px' }}>
                           Taxable: €{inheritanceTax.taxableValue.toLocaleString()} ({(inheritanceTax.taxRatio * 100)}% of €{inheritanceTax.fairMarketValue.toLocaleString()})
                         </div>
                       </div>
 
-                      <div style={{ backgroundColor: '#fff', padding: '12px', borderRadius: '6px', border: '1px solid #e0e0e0', textAlign: 'center' }}>
-                        <div style={{ fontSize: '11px', color: '#5b3a8c', fontWeight: 'bold', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                      <div style={styles.statCard}>
+                        <div style={styles.statLabel}>
                           Annual Workload
                           <InfoButton id="succWorkload" showInfo={showInfo} setShowInfo={setShowInfo}>
                             Estimated hours per year for forest management. Active management: ~3.5 hrs/ha (planning, marking trees, supervising harvest, tending) + 10hrs overhead. Hold strategy: ~0.5 hrs/ha (monitoring, boundary maintenance). Average Finnish forest owner age is 62 — workload is a key succession factor.
@@ -2435,26 +3008,43 @@ const ndviArray = rasters[0];  // Float32Array`}
                       </LineChart>
                     </ResponsiveContainer>
 
-                    <p style={{ fontSize: '11px', color: '#666', margin: '10px 0 0 0', fontStyle: 'italic' }}>
+                    <p style={styles.moduleFootnote}>
                       Succession planning estimates use Finnish Tax Authority 2024 rates and Southern Finland land values. 40% of Finnish forest transfers are unplanned — consider formalizing a succession plan.
                       Consult a forest tax specialist for binding tax calculations.
                     </p>
                   </div>
-                </>
+                </div>
               );
             })()}
 
           </div>
         </div>
       )}
-      <p style={{ fontSize: '12px', marginTop: '15px', color: '#666' }}>
-        <strong>Author:</strong> <a href="https://x.com/robertkottelin" target="_blank" rel="noopener noreferrer">@robertkottelin</a>
-      </p>
-      <p style={{ fontSize: '12px', color: '#666' }}>
-        <strong>Source code:</strong> <a href="https://github.com/robertkottelin/biomass" target="_blank" rel="noopener noreferrer">Github</a>
-      </p>
+      <div style={{ borderTop: `1px solid ${colors.gray200}`, marginTop: '24px', paddingTop: '16px', textAlign: 'center' }}>
+        <p style={{ fontSize: '12px', color: colors.gray500 }}>
+          <strong>Author:</strong> <a href="https://x.com/robertkottelin" target="_blank" rel="noopener noreferrer">@robertkottelin</a>
+          {' | '}
+          <strong>Source code:</strong> <a href="https://github.com/robertkottelin/biomass" target="_blank" rel="noopener noreferrer">Github</a>
+        </p>
+      </div>
 
     </div>
+    {exportingPdf && (
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex',
+        alignItems: 'center', justifyContent: 'center', zIndex: 9999
+      }}>
+        <div style={{
+          backgroundColor: '#fff', borderRadius: '12px', padding: '32px 48px',
+          textAlign: 'center', boxShadow: '0 4px 24px rgba(0,0,0,0.2)'
+        }}>
+          <h3 style={{ margin: '0 0 12px 0', color: colors.darkGreen }}>Generating PDF Report...</h3>
+          <p style={{ margin: 0, fontSize: '14px', color: '#666' }}>{pdfProgress}</p>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
 

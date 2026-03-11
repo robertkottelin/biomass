@@ -25,4 +25,5 @@ dist-ssr
 forest-biomass-analyzer/package-lock.json
 server/package-lock.json
 server/data/
+server/logs/
 .env

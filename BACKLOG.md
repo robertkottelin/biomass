@@ -4,17 +4,11 @@ Features removed from the landing page because they are not yet implemented.
 
 ## High Priority
 
-### PDF Export (Business tier)
-- Generate branded PDF reports with all analysis sections
-- Include charts, maps, and data tables
-- Tech: jspdf + html2canvas
-- Originally planned for Phase 4
-
 ### Save/Load Forests (Pro & Business)
 - "Save Forest" button in the dashboard
 - "My Forests" list/dropdown to reload saved analyses
+- saved forests should be displayed and saved on the map for visual selection. 
 - Backend CRUD routes exist (`/api/forests`) but frontend UI not yet built
-- Originally planned for Phase 4
 
 ### Stripe Checkout Integration
 - Wire up pricing buttons to Stripe Checkout sessions

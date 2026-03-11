@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const knex = require('knex');
 const knexConfig = require('../db/knexfile');
+const logger = require('../lib/logger');
 
 const db = knex(knexConfig);
 
@@ -46,6 +47,7 @@ async function requireAuth(req, res, next) {
     next();
   } catch (err) {
     if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
+      logger.debug('Auth token rejected', { reason: err.name, path: req.originalUrl });
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
     next(err);

@@ -1,8 +1,9 @@
 const rateLimit = require('express-rate-limit');
+const logger = require('../lib/logger');
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5,
+  max: 30,
   message: { error: 'Too many authentication attempts. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -10,7 +11,7 @@ const authLimiter = rateLimit({
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 600,
   message: { error: 'Too many requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -54,6 +55,7 @@ function sentinelLimiter(req, res, next) {
   const current = dailyCounts.get(key) || 0;
 
   if (current >= limit) {
+    logger.warn('Sentinel daily limit reached', { userId: req.user.id, plan, limit, used: current });
     return res.status(429).json({
       error: 'Daily Sentinel API limit reached',
       message: `You have used all ${limit} Sentinel API requests for today. ${plan === 'pro' ? 'Upgrade to Business for 500/day.' : 'Limit resets at midnight.'}`,

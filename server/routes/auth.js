@@ -5,6 +5,7 @@ const knex = require('knex');
 const knexConfig = require('../db/knexfile');
 const { requireAuth } = require('../middleware/auth');
 const { authLimiter } = require('../middleware/rateLimit');
+const logger = require('../lib/logger');
 
 const db = knex(knexConfig);
 const router = express.Router();
@@ -66,6 +67,7 @@ router.post('/register', authLimiter, async (req, res, next) => {
 
     const user = { id: userId, email: email.toLowerCase().trim(), name: name || null };
     setTokenCookie(res, user);
+    logger.info('User registered', { userId, email: user.email });
 
     res.status(201).json({
       user: {
@@ -104,6 +106,7 @@ router.post('/login', authLimiter, async (req, res, next) => {
       .first();
 
     setTokenCookie(res, user);
+    logger.info('User logged in', { userId: user.id, email: user.email, plan: sub ? sub.plan : 'free' });
 
     res.json({
       user: {

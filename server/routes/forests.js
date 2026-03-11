@@ -4,6 +4,7 @@ const knex = require('knex');
 const knexConfig = require('../db/knexfile');
 const { requireAuth } = require('../middleware/auth');
 const { checkForestLimit } = require('../middleware/tierCheck');
+const logger = require('../lib/logger');
 
 const db = knex(knexConfig);
 const router = express.Router();
@@ -23,7 +24,7 @@ router.get('/', requireAuth, async (req, res, next) => {
   try {
     const forests = await db('forests')
       .where('user_id', req.user.id)
-      .select('id', 'name', 'forest_type', 'forest_age', 'area_hectares', 'created_at')
+      .select('id', 'name', 'polygon_geojson', 'forest_type', 'forest_age', 'area_hectares', 'created_at')
       .orderBy('created_at', 'desc');
 
     res.json({ forests });
@@ -54,6 +55,7 @@ router.post('/', requireAuth, checkForestLimit, async (req, res, next) => {
     });
 
     const forest = await db('forests').where('id', id).first();
+    logger.info('Forest created', { forestId: id, userId: req.user.id, name: forest.name });
     res.status(201).json({ forest });
   } catch (err) {
     next(err);
@@ -109,6 +111,7 @@ router.delete('/:id', requireAuth, async (req, res, next) => {
 
     await db('analyses').where('forest_id', forest.id).del();
     await db('forests').where('id', forest.id).del();
+    logger.info('Forest deleted', { forestId: forest.id, userId: req.user.id });
 
     res.json({ message: 'Forest deleted' });
   } catch (err) {
@@ -141,6 +144,7 @@ router.post('/:id/analyses', requireAuth, async (req, res, next) => {
       ndvi_data_json: ndviStr,
       biomass_data_json: biomassStr,
     });
+    logger.info('Analysis saved', { analysisId: id, forestId: forest.id, userId: req.user.id });
 
     res.status(201).json({
       analysis: { id, forest_id: forest.id, created_at: new Date().toISOString() },

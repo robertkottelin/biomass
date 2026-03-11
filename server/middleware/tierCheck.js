@@ -1,5 +1,6 @@
 const knex = require('knex');
 const knexConfig = require('../db/knexfile');
+const logger = require('../lib/logger');
 
 const db = knex(knexConfig);
 
@@ -44,6 +45,7 @@ async function checkForestLimit(req, res, next) {
   const currentCount = count ? count.cnt : 0;
 
   if (currentCount >= limit) {
+    logger.warn('Forest limit reached', { userId: req.user.id, plan, limit, currentCount });
     const msg =
       limit === 0
         ? 'Free plan users can only access the demo forest. Upgrade to Pro to save your own forests.'

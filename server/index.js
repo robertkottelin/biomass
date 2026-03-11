@@ -11,6 +11,7 @@ const cors = require('cors');
 const knex = require('knex');
 const knexConfig = require('./db/knexfile');
 
+const logger = require('./lib/logger');
 const authRoutes = require('./routes/auth');
 const sentinelRoutes = require('./routes/sentinel');
 const stripeRoutes = require('./routes/stripe');
@@ -61,8 +62,22 @@ app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
 // ── JSON body parser for all other routes ─────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 
-// ── General rate limiter ──────────────────────────────────────────────
-app.use('/api/', apiLimiter);
+// ── Request logging ──────────────────────────────────────────────────
+app.use('/api/', (req, res, next) => {
+  const start = Date.now();
+  const { method, originalUrl } = req;
+  const userId = req.user ? req.user.id : '-';
+
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+    logger[level](`${method} ${originalUrl} ${res.statusCode} ${duration}ms`, { userId });
+  });
+  next();
+});
+
+// ── General rate limiter (sentinel has its own dedicated limiter) ─────
+app.use(/\/api\/(?!sentinel)/, apiLimiter);
 
 // ── API Routes ────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
@@ -84,7 +99,7 @@ if (fs.existsSync(buildPath)) {
 
 // ── Error handler ─────────────────────────────────────────────────────
 app.use((err, req, res, _next) => {
-  console.error('Unhandled error:', err);
+  logger.error(`Unhandled error on ${req.method} ${req.originalUrl}`, err);
   res.status(err.status || 500).json({
     error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
   });
@@ -101,17 +116,17 @@ async function start() {
 
     // Run migrations
     const db = knex(knexConfig);
-    console.log('Running database migrations...');
+    logger.info('Running database migrations...');
     await db.migrate.latest();
-    console.log('Migrations complete.');
+    logger.info('Migrations complete.');
     await db.destroy();
 
     app.listen(PORT, () => {
-      console.log(`Biomass server running on port ${PORT}`);
-      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      logger.info(`Biomass server running on port ${PORT}`);
+      logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
     });
   } catch (err) {
-    console.error('Failed to start server:', err);
+    logger.error('Failed to start server', err);
     process.exit(1);
   }
 }
