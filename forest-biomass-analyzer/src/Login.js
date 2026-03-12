@@ -157,7 +157,7 @@ export default function Login() {
 
   return (
     <div style={styles.container}>
-      <div style={styles.card}>
+      <div className="landing-login-card" style={styles.card}>
         <div style={styles.logo}>ForestData</div>
         <div style={styles.subtitle}>Forest Biomass Analyzer</div>
 

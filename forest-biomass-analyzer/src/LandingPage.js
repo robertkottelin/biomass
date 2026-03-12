@@ -99,6 +99,7 @@ export default function LandingPage() {
             <span style={s.brandIcon}>{'\uD83C\uDF32'}</span> ForestData
           </div>
           <button
+            className="landing-hamburger"
             style={s.hamburger}
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             aria-label="Toggle menu"
@@ -106,7 +107,7 @@ export default function LandingPage() {
           >
             {mobileMenuOpen ? '\u2715' : '\u2630'}
           </button>
-          <div style={{ ...s.navLinks, ...(mobileMenuOpen ? s.navLinksMobile : {}) }}>
+          <div className={`landing-nav-links${mobileMenuOpen ? ' open' : ''}`} style={s.navLinks}>
             <button style={s.navLink} onClick={() => scrollTo('features')} type="button">Features</button>
             <button style={s.navLink} onClick={() => scrollTo('pricing')} type="button">Pricing</button>
             <button style={s.navLink} onClick={() => scrollTo('faq')} type="button">FAQ</button>
@@ -129,10 +130,10 @@ export default function LandingPage() {
       </nav>
 
       {/* HERO */}
-      <section style={s.hero}>
+      <section className="landing-hero" style={s.hero}>
         <div style={s.heroContent}>
-          <h1 style={s.heroTitle}>Satellite-Powered Forest Analytics</h1>
-          <p style={s.heroSub}>
+          <h1 className="landing-hero-title" style={s.heroTitle}>Satellite-Powered Forest Analytics</h1>
+          <p className="landing-hero-sub" style={s.heroSub}>
             Monitor biomass, track growth, and make data-driven decisions for your forest.
             Powered by ESA Sentinel-2 satellite imagery.
           </p>
@@ -145,7 +146,7 @@ export default function LandingPage() {
             </button>
           </div>
         </div>
-        <div style={s.heroVisual}>
+        <div className="landing-hero-visual" style={s.heroVisual}>
           <div style={s.dashboardMock}>
             <div style={s.mockBar}>
               <span style={s.mockDot('#ef4444')} />
@@ -154,20 +155,182 @@ export default function LandingPage() {
               <span style={s.mockBarTitle}>Forest Analysis Dashboard</span>
             </div>
             <div style={s.mockBody}>
-              <div style={s.mockMap} />
-              <div style={s.mockCharts}>
-                <div style={s.mockChart}>
-                  <div style={s.mockChartLabel}>NDVI Trend</div>
-                  <div style={s.mockChartBars}>
-                    {[40, 55, 50, 65, 60, 70, 68, 75, 72, 78].map((h, i) => (
-                      <div key={i} style={{ ...s.mockChartBar, height: `${h}%` }} />
+              {/* Map + stats side by side */}
+              <div className="landing-mock-map-stats" style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                {/* SVG Map visualization */}
+                <div style={{ flex: '1 1 55%', borderRadius: '8px', overflow: 'hidden', position: 'relative', minHeight: '110px' }}>
+                  <svg viewBox="0 0 220 120" style={{ width: '100%', height: '100%', display: 'block', background: '#e8f0e4' }}>
+                    <defs>
+                      <linearGradient id="mapForest" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%" stopColor="#2d6a4f"/>
+                        <stop offset="100%" stopColor="#52b788"/>
+                      </linearGradient>
+                      <pattern id="topo" patternUnits="userSpaceOnUse" width="20" height="20">
+                        <path d="M0,10 Q5,5 10,10 T20,10" fill="none" stroke="#c8dcc0" strokeWidth="0.4"/>
+                        <path d="M0,17 Q5,12 10,17 T20,17" fill="none" stroke="#c8dcc0" strokeWidth="0.3"/>
+                      </pattern>
+                    </defs>
+                    {/* Topo background */}
+                    <rect width="220" height="120" fill="url(#topo)"/>
+                    {/* Water features */}
+                    <path d="M0,85 Q15,80 30,82 Q50,88 65,84 Q80,80 90,90 L90,120 L0,120 Z" fill="#a8d8ea" opacity="0.5"/>
+                    <ellipse cx="185" cy="30" rx="22" ry="12" fill="#a8d8ea" opacity="0.4"/>
+                    {/* Road */}
+                    <path d="M0,55 Q40,50 80,58 Q120,66 160,52 Q190,42 220,48" fill="none" stroke="#d4c5a0" strokeWidth="1.5" strokeDasharray="4,2"/>
+                    {/* Forest polygon (selected area) */}
+                    <polygon points="55,18 105,12 140,25 148,55 130,72 95,75 60,65 45,42" fill="url(#mapForest)" opacity="0.6" stroke={colors.medGreen} strokeWidth="1.5"/>
+                    {/* NDVI heatmap cells inside polygon */}
+                    {[
+                      [68,28,12,10,'#40916c'], [82,24,14,11,'#2d6a4f'], [98,20,13,12,'#1a472a'],
+                      [112,28,12,11,'#2d6a4f'], [126,35,11,10,'#40916c'],
+                      [60,40,13,11,'#52b788'], [75,36,14,12,'#2d6a4f'], [90,33,13,13,'#1a472a'],
+                      [105,38,14,12,'#2d6a4f'], [120,44,12,11,'#40916c'], [133,50,10,10,'#52b788'],
+                      [65,53,14,11,'#40916c'], [80,49,13,12,'#2d6a4f'], [95,47,14,13,'#1a472a'],
+                      [110,52,13,12,'#2d6a4f'], [124,58,11,10,'#40916c'],
+                      [75,63,13,10,'#52b788'], [90,61,13,11,'#2d6a4f'], [105,64,12,10,'#40916c'],
+                    ].map(([x,y,w,h,c], i) => (
+                      <rect key={i} x={x} y={y} width={w} height={h} rx="1" fill={c} opacity="0.45"/>
                     ))}
+                    {/* Pin marker */}
+                    <circle cx="95" cy="45" r="4" fill="#ef4444" stroke="#fff" strokeWidth="1.5"/>
+                    <circle cx="95" cy="45" r="1.5" fill="#fff"/>
+                    {/* Scale bar */}
+                    <line x1="155" y1="108" x2="205" y2="108" stroke="#555" strokeWidth="0.8"/>
+                    <line x1="155" y1="106" x2="155" y2="110" stroke="#555" strokeWidth="0.8"/>
+                    <line x1="205" y1="106" x2="205" y2="110" stroke="#555" strokeWidth="0.8"/>
+                    <text x="180" y="106" textAnchor="middle" fontSize="5.5" fill="#555">2 km</text>
+                    {/* Coordinates label */}
+                    <rect x="3" y="3" width="62" height="12" rx="2" fill="rgba(255,255,255,0.85)"/>
+                    <text x="6" y="11" fontSize="5.5" fill="#555">61.4978N, 23.7610E</text>
+                    {/* NDVI legend */}
+                    <rect x="3" y="100" width="50" height="16" rx="2" fill="rgba(255,255,255,0.85)"/>
+                    <text x="6" y="108" fontSize="4.5" fill="#555">NDVI</text>
+                    <rect x="22" y="104" width="6" height="6" rx="1" fill="#52b788" opacity="0.7"/>
+                    <text x="30" y="109" fontSize="4" fill="#666">0.5</text>
+                    <rect x="35" y="104" width="6" height="6" rx="1" fill="#1a472a" opacity="0.7"/>
+                    <text x="43" y="109" fontSize="4" fill="#666">0.9</text>
+                  </svg>
+                </div>
+                {/* Stats column */}
+                <div style={{ flex: '1 1 45%', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div className="landing-mock-stats-row" style={{ display: 'flex', gap: '6px' }}>
+                    <div style={s.mockStatCompact}>
+                      <div style={s.mockStatLabel}>Area</div>
+                      <div style={s.mockStatNum}>247 ha</div>
+                    </div>
+                    <div style={s.mockStatCompact}>
+                      <div style={s.mockStatLabel}>Biomass</div>
+                      <div style={s.mockStatNum}>142 t/ha</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <div style={s.mockStatCompact}>
+                      <div style={s.mockStatLabel}>Carbon Stock</div>
+                      <div style={s.mockStatNum}>8,640 tCO{'\u2082'}</div>
+                    </div>
+                    <div style={s.mockStatCompact}>
+                      <div style={s.mockStatLabel}>Est. Trees</div>
+                      <div style={s.mockStatNum}>186,200</div>
+                    </div>
+                  </div>
+                  <div style={{ ...s.mockStatCompact, background: 'rgba(45,106,79,0.08)', border: '1px solid rgba(45,106,79,0.2)' }}>
+                    <div style={s.mockStatLabel}>Timber Value</div>
+                    <div style={{ ...s.mockStatNum, color: '#16a34a', fontSize: '15px' }}>{'\u20AC'}1.24M</div>
+                  </div>
+                  <div style={{ ...s.mockStatCompact, background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)' }}>
+                    <div style={s.mockStatLabel}>CO{'\u2082'} Sequestered/yr</div>
+                    <div style={{ ...s.mockStatNum, color: '#2563eb' }}>432 t/yr</div>
                   </div>
                 </div>
-                <div style={s.mockStats}>
-                  <div style={s.mockStat}><div style={s.mockStatNum}>247 ha</div><div style={s.mockStatLabel}>Area</div></div>
-                  <div style={s.mockStat}><div style={s.mockStatNum}>0.72</div><div style={s.mockStatLabel}>Avg NDVI</div></div>
-                  <div style={s.mockStat}><div style={s.mockStatNum}>142 t/ha</div><div style={s.mockStatLabel}>Biomass</div></div>
+              </div>
+
+              {/* Biomass growth curve + optimal harvest */}
+              <div style={s.mockChartWide}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <div style={s.mockChartLabel}>Biomass Growth & Optimal Harvest Window</div>
+                  <div style={{ fontSize: '9px', color: colors.gray500, display: 'flex', gap: '10px' }}>
+                    <span><span style={{ display: 'inline-block', width: 8, height: 3, background: colors.medGreen, borderRadius: 2, marginRight: 3, verticalAlign: 'middle' }}/>Biomass</span>
+                    <span><span style={{ display: 'inline-block', width: 8, height: 3, background: '#60a5fa', borderRadius: 2, marginRight: 3, verticalAlign: 'middle' }}/>NPV</span>
+                  </div>
+                </div>
+                <svg viewBox="0 0 320 90" style={{ width: '100%', height: 'auto', display: 'block' }}>
+                  <defs>
+                    <linearGradient id="biomassGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={colors.medGreen} stopOpacity="0.3"/>
+                      <stop offset="100%" stopColor={colors.medGreen} stopOpacity="0.02"/>
+                    </linearGradient>
+                    <linearGradient id="npvGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#60a5fa" stopOpacity="0.2"/>
+                      <stop offset="100%" stopColor="#60a5fa" stopOpacity="0.02"/>
+                    </linearGradient>
+                  </defs>
+                  {/* Grid lines */}
+                  {[20, 40, 60].map(y => (
+                    <line key={y} x1="25" y1={y} x2="310" y2={y} stroke={colors.gray200} strokeWidth="0.5" strokeDasharray="3,3"/>
+                  ))}
+                  {/* Y-axis labels */}
+                  <text x="22" y="22" textAnchor="end" fontSize="6" fill={colors.gray500}>200</text>
+                  <text x="22" y="42" textAnchor="end" fontSize="6" fill={colors.gray500}>150</text>
+                  <text x="22" y="62" textAnchor="end" fontSize="6" fill={colors.gray500}>100</text>
+                  {/* X-axis year labels */}
+                  {['2016','2018','2020','2022','2024','2026','2028','2030','2032','2034'].map((yr, i) => (
+                    <text key={yr} x={25 + i * 31.7} y="85" textAnchor="middle" fontSize="6" fill={colors.gray500}>{yr}</text>
+                  ))}
+                  {/* Biomass growth area fill */}
+                  <path d="M25,68 C50,65 75,58 100,50 C125,43 150,37 175,32 C200,28 225,25 250,23 C270,22 290,21.5 310,21 L310,75 L25,75 Z" fill="url(#biomassGrad)"/>
+                  {/* Biomass growth curve (S-curve) */}
+                  <path d="M25,68 C50,65 75,58 100,50 C125,43 150,37 175,32 C200,28 225,25 250,23 C270,22 290,21.5 310,21" fill="none" stroke={colors.medGreen} strokeWidth="2" strokeLinecap="round"/>
+                  {/* NPV curve (peaks then declines) */}
+                  <path d="M25,70 C50,62 75,48 100,38 C125,30 150,25 175,22 C195,20 210,19.5 225,20 C250,22 275,28 310,40" fill="none" stroke="#60a5fa" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="4,2"/>
+                  {/* NPV area fill */}
+                  <path d="M25,70 C50,62 75,48 100,38 C125,30 150,25 175,22 C195,20 210,19.5 225,20 C250,22 275,28 310,40 L310,75 L25,75 Z" fill="url(#npvGrad)"/>
+                  {/* Optimal harvest marker */}
+                  <line x1="215" y1="12" x2="215" y2="75" stroke="#f59e0b" strokeWidth="1.2" strokeDasharray="3,2"/>
+                  <circle cx="215" cy="19.5" r="3" fill="#f59e0b" stroke="#fff" strokeWidth="1"/>
+                  {/* Optimal harvest label */}
+                  <rect x="185" y="5" width="60" height="11" rx="3" fill="#f59e0b" opacity="0.9"/>
+                  <text x="215" y="12.5" textAnchor="middle" fontSize="6.5" fill="#fff" fontWeight="bold">Harvest 2031</text>
+                  {/* Current year marker */}
+                  <line x1="152" y1="28" x2="152" y2="75" stroke={colors.gray500} strokeWidth="0.7" strokeDasharray="2,2"/>
+                  <text x="152" y="79" textAnchor="middle" fontSize="5.5" fill={colors.gray500}>Now</text>
+                </svg>
+              </div>
+
+              {/* Bottom row: three mini charts */}
+              <div style={s.mockCharts}>
+                <div style={s.mockChart}>
+                  <div style={s.mockChartLabel}>NDVI Trend (10yr)</div>
+                  <svg viewBox="0 0 140 45" style={{ width: '100%', height: 'auto', display: 'block' }}>
+                    <path d="M5,38 C15,35 25,30 35,32 C45,34 55,26 65,22 C75,18 85,20 95,16 C105,13 115,14 125,10 C130,8 135,7 138,6" fill="none" stroke={colors.lightGreen} strokeWidth="1.5" strokeLinecap="round"/>
+                    <path d="M5,38 C15,35 25,30 35,32 C45,34 55,26 65,22 C75,18 85,20 95,16 C105,13 115,14 125,10 C130,8 135,7 138,6 L138,42 L5,42 Z" fill={colors.lightGreen} opacity="0.15"/>
+                    {[[5,38],[20,33],[35,32],[50,28],[65,22],[80,19],[95,16],[110,13.5],[125,10],[138,6]].map(([x,y],i) => (
+                      <circle key={i} cx={x} cy={y} r="2" fill={colors.medGreen} stroke="#fff" strokeWidth="0.7"/>
+                    ))}
+                    <text x="5" y="8" fontSize="7" fill={colors.medGreen} fontWeight="bold">+0.14</text>
+                    <text x="25" y="8" fontSize="5" fill={colors.gray500}>avg/decade</text>
+                  </svg>
+                </div>
+                <div style={s.mockChart}>
+                  <div style={s.mockChartLabel}>Species & Harvest NPV</div>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-end', height: '36px' }}>
+                    {[
+                      { label: 'Pine', pct: 62, color: colors.darkGreen, npv: '\u20AC847k' },
+                      { label: 'Spruce', pct: 28, color: colors.lightGreen, npv: '\u20AC312k' },
+                      { label: 'Birch', pct: 10, color: colors.paleGreen, npv: '\u20AC82k' },
+                    ].map((sp, i) => (
+                      <div key={i} style={{ flex: sp.pct, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                        <span style={{ fontSize: '6px', color: colors.gray500, fontWeight: '600' }}>{sp.npv}</span>
+                        <div style={{
+                          width: '100%',
+                          height: `${sp.pct * 0.45}px`,
+                          background: sp.color,
+                          borderRadius: '2px 2px 0 0',
+                          minHeight: '6px',
+                        }}/>
+                        <span style={{ fontSize: '6px', color: colors.gray500 }}>{sp.label} {sp.pct}%</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -178,7 +341,7 @@ export default function LandingPage() {
       {/* FEATURES */}
       <section id="features" style={s.section}>
         <div style={s.sectionInner}>
-          <h2 style={s.sectionTitle}>Comprehensive Forest Intelligence</h2>
+          <h2 className="landing-section-title" style={s.sectionTitle}>Comprehensive Forest Intelligence</h2>
           <p style={s.sectionSub}>
             Everything you need to understand, manage, and protect your forest assets.
           </p>
@@ -197,7 +360,7 @@ export default function LandingPage() {
       {/* PRICING */}
       <section id="pricing" style={{ ...s.section, background: colors.offWhite }}>
         <div style={s.sectionInner}>
-          <h2 style={s.sectionTitle}>Simple, Transparent Pricing</h2>
+          <h2 className="landing-section-title" style={s.sectionTitle}>Simple, Transparent Pricing</h2>
           <p style={s.sectionSub}>Start free, upgrade when you need real satellite data.</p>
           <div style={s.pricingGrid}>
             {/* Free */}
@@ -222,7 +385,7 @@ export default function LandingPage() {
             </div>
 
             {/* Pro */}
-            <div style={{ ...s.pricingCard, ...s.pricingCardPro }}>
+            <div className="landing-pricing-card-pro" style={{ ...s.pricingCard, ...s.pricingCardPro }}>
               <div style={s.popularBadge}>Most Popular</div>
               <h3 style={{ ...s.pricingName, color: colors.white }}>Pro</h3>
               <div style={{ ...s.pricingPrice, color: colors.white }}>
@@ -274,7 +437,7 @@ export default function LandingPage() {
       {/* HOW IT WORKS */}
       <section style={s.section}>
         <div style={s.sectionInner}>
-          <h2 style={s.sectionTitle}>How It Works</h2>
+          <h2 className="landing-section-title" style={s.sectionTitle}>How It Works</h2>
           <p style={s.sectionSub}>From drawing to insights in three simple steps.</p>
           <div style={s.stepsGrid}>
             {[
@@ -295,7 +458,7 @@ export default function LandingPage() {
       {/* FAQ */}
       <section id="faq" style={{ ...s.section, background: colors.offWhite }}>
         <div style={s.sectionInner}>
-          <h2 style={s.sectionTitle}>Frequently Asked Questions</h2>
+          <h2 className="landing-section-title" style={s.sectionTitle}>Frequently Asked Questions</h2>
           <div style={s.faqList}>
             {faqData.map((item, i) => (
               <div key={i} style={s.faqItem}>
@@ -518,19 +681,29 @@ function buildStyles() {
       marginLeft: '8px',
     },
     mockBody: {
-      padding: '16px',
+      padding: '14px',
     },
-    mockMap: {
-      height: '120px',
+    mockStatsRow: {
+      display: 'flex',
+      gap: '8px',
+      marginBottom: '10px',
+    },
+    mockStatCompact: {
+      flex: 1,
+      background: colors.gray100,
+      borderRadius: '6px',
+      padding: '6px 8px',
+      textAlign: 'center',
+    },
+    mockChartWide: {
+      background: colors.gray100,
       borderRadius: '8px',
-      background: 'linear-gradient(135deg, #2d6a4f 0%, #40916c 40%, #52b788 70%, #95d5b2 100%)',
-      marginBottom: '12px',
-      position: 'relative',
-      overflow: 'hidden',
+      padding: '10px 10px 4px',
+      marginBottom: '10px',
     },
     mockCharts: {
       display: 'flex',
-      gap: '12px',
+      gap: '10px',
     },
     mockChart: {
       flex: 1,
@@ -539,41 +712,20 @@ function buildStyles() {
       padding: '10px',
     },
     mockChartLabel: {
-      fontSize: '11px',
+      fontSize: '10px',
       color: colors.gray500,
-      marginBottom: '8px',
+      marginBottom: '4px',
       fontWeight: '600',
     },
-    mockChartBars: {
-      display: 'flex',
-      alignItems: 'flex-end',
-      gap: '3px',
-      height: '50px',
-    },
-    mockChartBar: {
-      flex: 1,
-      background: `linear-gradient(to top, ${colors.medGreen}, ${colors.lightGreen})`,
-      borderRadius: '2px 2px 0 0',
-    },
-    mockStats: {
-      flex: 1,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '6px',
-    },
-    mockStat: {
-      background: colors.gray100,
-      borderRadius: '8px',
-      padding: '8px 10px',
-    },
     mockStatNum: {
-      fontSize: '14px',
+      fontSize: '13px',
       fontWeight: '700',
       color: colors.darkGreen,
     },
     mockStatLabel: {
-      fontSize: '10px',
+      fontSize: '9px',
       color: colors.gray500,
+      marginBottom: '1px',
     },
 
     /* SECTIONS */

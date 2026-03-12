@@ -161,6 +161,8 @@ const InfoButton = ({ id, showInfo, setShowInfo, children }) => (
   </span>
 );
 
+const forestTypeNames = { pine: 'Pine', fir: 'Spruce', birch: 'Birch', aspen: 'Aspen' };
+
 const colors = {
   darkGreen: '#1a472a',
   medGreen: '#2d6a4f',
@@ -220,8 +222,41 @@ const ForestBiomassApp = () => {
   }, [isDemo]);
 
   useEffect(() => {
-    fetchSavedForests();
+    fetchSavedForests().then(() => {
+      // Auto-fly handled in separate effect watching savedForests
+    });
   }, [fetchSavedForests]);
+
+  // Auto-fly to user's saved forests on initial load
+  const hasFlewToForests = React.useRef(false);
+  useEffect(() => {
+    if (hasFlewToForests.current || !savedForests.length || !mapRef.current) return;
+    hasFlewToForests.current = true;
+    try {
+      const allCoords = [];
+      savedForests.forEach(f => {
+        if (f.polygon_geojson) {
+          const geojson = typeof f.polygon_geojson === 'string' ? JSON.parse(f.polygon_geojson) : f.polygon_geojson;
+          if (geojson.coordinates && geojson.coordinates[0]) {
+            geojson.coordinates[0].forEach(coord => {
+              // GeoJSON is [lng, lat], Leaflet needs [lat, lng]
+              allCoords.push([coord[1], coord[0]]);
+            });
+          }
+        }
+      });
+      if (allCoords.length > 0) {
+        const bounds = L.latLngBounds(allCoords);
+        setTimeout(() => {
+          if (mapRef.current) {
+            mapRef.current.flyToBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+          }
+        }, 300);
+      }
+    } catch (err) {
+      console.error('Failed to fly to saved forests:', err);
+    }
+  }, [savedForests]);
 
   // Handle post-checkout success
   useEffect(() => {
@@ -244,11 +279,11 @@ const ForestBiomassApp = () => {
     }
   };
 
-  // Save the current analyzed forest
+  // Save the current forest (with or without analysis)
   const saveCurrentForest = async () => {
-    if (!selectedForests.length || !biomassData.length) return;
+    if (!selectedForests.length) return;
     const forest = selectedForests[selectedForestIndex];
-    const defaultName = `${forestType.charAt(0).toUpperCase() + forestType.slice(1)} Forest – ${forest.area}ha`;
+    const defaultName = `${forestTypeNames[forestType] || forestType} Forest – ${forest.area}ha`;
     const name = window.prompt('Name this forest:', defaultName);
     if (!name) return;
 
@@ -269,10 +304,12 @@ const ForestBiomassApp = () => {
         area_hectares: parseFloat(forest.area),
       });
 
-      // Save analysis data
-      await api.post(`/api/forests/${result.forest.id}/analyses`, {
-        biomass_data_json: biomassData,
-      });
+      // Save analysis data if available
+      if (biomassData.length > 0) {
+        await api.post(`/api/forests/${result.forest.id}/analyses`, {
+          biomass_data_json: biomassData,
+        });
+      }
 
       // Update the current forest's name in state
       setSelectedForests(prev => {
@@ -1111,6 +1148,7 @@ const ForestBiomassApp = () => {
       borderRadius: '8px',
       fontSize: '14px',
       width: '100%',
+      boxSizing: 'border-box',
       color: colors.gray900
     },
     select: {
@@ -1119,6 +1157,7 @@ const ForestBiomassApp = () => {
       borderRadius: '8px',
       fontSize: '14px',
       width: '100%',
+      boxSizing: 'border-box',
       backgroundColor: colors.white,
       color: colors.gray900
     },
@@ -1504,13 +1543,13 @@ const ForestBiomassApp = () => {
 
             <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>3. Forest Parameters</h4>
             <ul style={{ marginLeft: '20px' }}>
-              <li><strong>Forest Type:</strong> Select species (Pine, Fir, Birch, Aspen) — affects growth curves and maximum biomass</li>
+              <li><strong>Forest Type:</strong> Select species (Pine, Spruce, Birch, Aspen) — affects growth curves and maximum biomass</li>
               <li><strong>Forest Age:</strong> Current age of the forest as of today. The app automatically calculates the age at the start of the 10-year analysis period</li>
               <li><strong>Age Estimation:</strong> Enable "Estimate age from NDVI" to let the app estimate forest age from the satellite data trend</li>
               <li><strong>Default Parameters Source:</strong> Growth models calibrated with data from <strong>Luke (Finnish Natural Resources Institute)</strong>:
                 <ul style={{ marginTop: '5px' }}>
                   <li>Pine: Max 450 t/ha, growth rate 0.08/year, NDVI saturation 0.85</li>
-                  <li>Fir: Max 500 t/ha, growth rate 0.07/year, NDVI saturation 0.88</li>
+                  <li>Spruce: Max 500 t/ha, growth rate 0.07/year, NDVI saturation 0.88</li>
                   <li>Birch: Max 300 t/ha, growth rate 0.12/year, NDVI saturation 0.82</li>
                   <li>Aspen: Max 250 t/ha, growth rate 0.15/year, NDVI saturation 0.80</li>
                 </ul>
@@ -1528,7 +1567,7 @@ const ForestBiomassApp = () => {
 
             <h4 style={{ marginTop: '15px', marginBottom: '10px', color: colors.medGreen }}>5. Saving & Loading Forests (Pro & Business)</h4>
             <ul style={{ marginLeft: '20px' }}>
-              <li>After analyzing a forest, click "Save Forest" to save the polygon and analysis results</li>
+              <li>Draw a forest polygon and click "Save Forest" to save it (analysis is optional)</li>
               <li>Saved forests appear in the "My Saved Forests" panel and as blue dashed outlines on the map</li>
               <li>Click a saved forest card or its map outline to reload the forest and all its analysis data</li>
               <li>Pro users can save up to 10 forests; Business users have unlimited forests</li>
@@ -1759,7 +1798,7 @@ Biomass = YoungBiomass + (MaxBiomass - YoungBiomass) × growthFactor × ndviFact
             <h4>Species-Specific Parameters (from Finnish Forest Research Institute):</h4>
             <pre style={styles.codeBlock}>
 {`Pine:  Max 450 t/ha, growth rate 0.08/year, NDVI saturation 0.85
-Fir:   Max 500 t/ha, growth rate 0.07/year, NDVI saturation 0.88
+Spruce: Max 500 t/ha, growth rate 0.07/year, NDVI saturation 0.88
 Birch: Max 300 t/ha, growth rate 0.12/year, NDVI saturation 0.82
 Aspen: Max 250 t/ha, growth rate 0.15/year, NDVI saturation 0.80`}
             </pre>
@@ -1876,10 +1915,96 @@ const ndreArray = rasters[2];   // Red edge index`}
           <label style={styles.label}>Forest Type</label>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
             {[
-              { value: 'pine', emoji: '\uD83C\uDF32', name: 'Pine', hint: 'Needles, cones' },
-              { value: 'fir', emoji: '\uD83C\uDF84', name: 'Fir', hint: 'Dense, conical' },
-              { value: 'birch', emoji: '\uD83C\uDF43', name: 'Birch', hint: 'White bark, leaves' },
-              { value: 'aspen', emoji: '\uD83C\uDF42', name: 'Aspen', hint: 'Trembling leaves' },
+              { value: 'pine', name: 'Pine',
+                icon: <svg viewBox="0 0 40 48" width="32" height="38" style={{display:'block',margin:'0 auto'}}>
+                  {/* Trunk — tall, straight, reddish-brown */}
+                  <rect x="18" y="18" width="4" height="28" rx="1" fill="#8B5E3C"/>
+                  <line x1="19" y1="20" x2="19" y2="46" stroke="#6B4226" strokeWidth="0.5" opacity="0.4"/>
+                  {/* Crown — sparse, rounded, high on trunk (characteristic pine shape) */}
+                  <ellipse cx="20" cy="10" rx="11" ry="9" fill="#2d6a4f"/>
+                  <ellipse cx="20" cy="10" rx="11" ry="9" fill="none" stroke="#1a472a" strokeWidth="0.6"/>
+                  {/* Needle texture — short radiating strokes */}
+                  <g stroke="#40916c" strokeWidth="0.7" opacity="0.7">
+                    <line x1="14" y1="7" x2="11" y2="5"/><line x1="16" y1="5" x2="14" y2="3"/>
+                    <line x1="20" y1="3" x2="20" y2="1"/><line x1="24" y1="5" x2="26" y2="3"/>
+                    <line x1="26" y1="7" x2="29" y2="5"/><line x1="28" y1="11" x2="31" y2="10"/>
+                    <line x1="12" y1="11" x2="9" y2="10"/><line x1="13" y1="14" x2="10" y2="14"/>
+                    <line x1="27" y1="14" x2="30" y2="14"/>
+                  </g>
+                  {/* Subtle inner shadow for depth */}
+                  <ellipse cx="18" cy="11" rx="5" ry="4" fill="#1a472a" opacity="0.15"/>
+                </svg>
+              },
+              { value: 'fir', name: 'Spruce',
+                icon: <svg viewBox="0 0 40 48" width="32" height="38" style={{display:'block',margin:'0 auto'}}>
+                  {/* Trunk */}
+                  <rect x="18.5" y="36" width="3" height="10" rx="0.8" fill="#6B4226"/>
+                  {/* Classic conical spruce — layered triangles */}
+                  <polygon points="20,2 12,16 28,16" fill="#2d6a4f"/>
+                  <polygon points="20,10 10,24 30,24" fill="#40916c"/>
+                  <polygon points="20,18 8,34 32,34" fill="#2d6a4f"/>
+                  {/* Branch edges — short horizontal lines for dense look */}
+                  <g stroke="#1a472a" strokeWidth="0.5" opacity="0.5">
+                    <line x1="14" y1="14" x2="12" y2="15"/><line x1="26" y1="14" x2="28" y2="15"/>
+                    <line x1="12" y1="22" x2="10" y2="23"/><line x1="28" y1="22" x2="30" y2="23"/>
+                    <line x1="10" y1="30" x2="8" y2="31"/><line x1="30" y1="30" x2="32" y2="31"/>
+                    <line x1="16" y1="26" x2="14" y2="27"/><line x1="24" y1="26" x2="26" y2="27"/>
+                  </g>
+                  {/* Inner shadow layers */}
+                  <polygon points="20,4 16,12 24,12" fill="#1a472a" opacity="0.12"/>
+                  <polygon points="20,12 14,20 26,20" fill="#1a472a" opacity="0.1"/>
+                </svg>
+              },
+              { value: 'birch', name: 'Birch',
+                icon: <svg viewBox="0 0 40 48" width="32" height="38" style={{display:'block',margin:'0 auto'}}>
+                  {/* Trunk — white/light with dark horizontal marks */}
+                  <rect x="17.5" y="16" width="5" height="30" rx="1.5" fill="#f0ece4"/>
+                  <rect x="17.5" y="16" width="5" height="30" rx="1.5" fill="none" stroke="#aaa" strokeWidth="0.5"/>
+                  {/* Birch bark marks */}
+                  {[20,24,28,33,38,42].map((y,i) => (
+                    <line key={i} x1="18" y1={y} x2="22" y2={y} stroke="#888" strokeWidth={0.6 + (i%2)*0.3} opacity="0.5"/>
+                  ))}
+                  {/* Crown — light, airy, rounded */}
+                  <ellipse cx="20" cy="13" rx="13" ry="11" fill="#6abf69" opacity="0.25"/>
+                  <ellipse cx="16" cy="10" rx="7" ry="6" fill="#52b788"/>
+                  <ellipse cx="25" cy="11" rx="6" ry="5.5" fill="#40916c"/>
+                  <ellipse cx="20" cy="7" rx="6" ry="5" fill="#6abf69"/>
+                  <ellipse cx="13" cy="14" rx="5" ry="4" fill="#52b788" opacity="0.8"/>
+                  <ellipse cx="27" cy="15" rx="4.5" ry="3.5" fill="#40916c" opacity="0.7"/>
+                  {/* Leaf texture — tiny dots */}
+                  <g fill="#2d6a4f" opacity="0.3">
+                    <circle cx="15" cy="8" r="0.8"/><circle cx="22" cy="6" r="0.8"/>
+                    <circle cx="25" cy="9" r="0.7"/><circle cx="18" cy="12" r="0.8"/>
+                    <circle cx="12" cy="13" r="0.7"/><circle cx="27" cy="13" r="0.7"/>
+                  </g>
+                  {/* Hanging branch hints */}
+                  <path d="M14,16 Q10,20 8,19" fill="none" stroke="#52b788" strokeWidth="0.6" opacity="0.6"/>
+                  <path d="M26,16 Q30,20 32,19" fill="none" stroke="#40916c" strokeWidth="0.6" opacity="0.6"/>
+                </svg>
+              },
+              { value: 'aspen', name: 'Aspen',
+                icon: <svg viewBox="0 0 40 48" width="32" height="38" style={{display:'block',margin:'0 auto'}}>
+                  {/* Trunk — smooth, greenish-grey */}
+                  <rect x="18" y="20" width="4" height="26" rx="1" fill="#b8c5a8"/>
+                  <rect x="18" y="20" width="4" height="26" rx="1" fill="none" stroke="#8a9a78" strokeWidth="0.4"/>
+                  {/* Crown — tall columnar shape, characteristic of aspen */}
+                  <ellipse cx="20" cy="14" rx="10" ry="13" fill="#7cb342" opacity="0.3"/>
+                  <ellipse cx="18" cy="11" rx="6" ry="7" fill="#8bc34a"/>
+                  <ellipse cx="23" cy="12" rx="5.5" ry="6.5" fill="#7cb342"/>
+                  <ellipse cx="20" cy="6" rx="5" ry="5" fill="#9ccc65"/>
+                  <ellipse cx="15" cy="16" rx="4.5" ry="4" fill="#7cb342" opacity="0.8"/>
+                  <ellipse cx="25" cy="17" rx="4" ry="3.5" fill="#8bc34a" opacity="0.7"/>
+                  {/* Trembling leaf hints — small circles with tiny stems */}
+                  <g opacity="0.5">
+                    <circle cx="13" cy="13" r="1.5" fill="#aed581" stroke="#689f38" strokeWidth="0.3"/>
+                    <circle cx="27" cy="10" r="1.3" fill="#c5e1a5" stroke="#689f38" strokeWidth="0.3"/>
+                    <circle cx="22" cy="4" r="1.2" fill="#aed581" stroke="#689f38" strokeWidth="0.3"/>
+                    <circle cx="16" cy="7" r="1" fill="#c5e1a5" stroke="#689f38" strokeWidth="0.3"/>
+                    <circle cx="25" cy="16" r="1.2" fill="#aed581" stroke="#689f38" strokeWidth="0.3"/>
+                    <circle cx="12" cy="18" r="1" fill="#c5e1a5" stroke="#689f38" strokeWidth="0.3"/>
+                  </g>
+                </svg>
+              },
             ].map(t => (
               <button
                 key={t.value}
@@ -1896,9 +2021,8 @@ const ndreArray = rasters[2];   // Red edge index`}
                   lineHeight: '1.3',
                 }}
               >
-                <span style={{ fontSize: '22px', display: 'block' }}>{t.emoji}</span>
+                {t.icon}
                 <strong>{t.name}</strong>
-                <span style={{ display: 'block', fontSize: '11px', color: colors.gray500 }}>{t.hint}</span>
               </button>
             ))}
           </div>
@@ -2005,7 +2129,7 @@ const ndreArray = rasters[2];   // Red edge index`}
                       >&times;</button>
                       <h4 style={{ margin: '0 0 6px', fontSize: '14px', color: colors.darkGreen, paddingRight: '20px' }}>{sf.name}</h4>
                       <p style={{ margin: '2px 0', fontSize: '12px', color: colors.gray500 }}>
-                        {sf.forest_type} · {sf.area_hectares ? `${Number(sf.area_hectares).toFixed(1)}ha` : 'N/A'}
+                        {forestTypeNames[sf.forest_type] || sf.forest_type} · {sf.area_hectares ? `${Number(sf.area_hectares).toFixed(1)}ha` : 'N/A'}
                       </p>
                       <p style={{ margin: '2px 0', fontSize: '11px', color: colors.gray500 }}>
                         Saved {new Date(sf.created_at).toLocaleDateString()}
@@ -2035,8 +2159,8 @@ const ndreArray = rasters[2];   // Red edge index`}
 
       <div data-pdf-section="Map" style={styles.mapContainer}>
         <MapContainer
-          center={[61.086011, 24.065087]}
-          zoom={12}
+          center={[62, 15]}
+          zoom={4}
           style={{ height: '100%', width: '100%' }}
           ref={mapRef}
         >
@@ -2113,7 +2237,7 @@ const ndreArray = rasters[2];   // Red edge index`}
             Cancel
           </button>
         )}
-        {!isDemo && biomassData.length > 0 && selectedForests.length > 0 && (
+        {!isDemo && selectedForests.length > 0 && (
           <button
             style={{
               ...styles.button,
@@ -2334,7 +2458,7 @@ const ndreArray = rasters[2];   // Red edge index`}
                     </div>
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>Biomass Estimates</strong> <InfoButton id="biomassEstimates" showInfo={showInfo} setShowInfo={setShowInfo}>
-                        Biomass (tons/ha) is estimated from each NDVI reading using a logistic growth curve calibrated per species. Parameters: pine max 450 t/ha at growth rate 0.08, fir 500 t/ha at 0.07, birch 300 t/ha at 0.12, aspen 250 t/ha at 0.15. Current and initial values are the last and first observations. Annual growth rate = (current − initial) / years elapsed.
+                        Biomass (tons/ha) is estimated from each NDVI reading using a logistic growth curve calibrated per species. Parameters: pine max 450 t/ha at growth rate 0.08, spruce 500 t/ha at 0.07, birch 300 t/ha at 0.12, aspen 250 t/ha at 0.15. Current and initial values are the last and first observations. Annual growth rate = (current − initial) / years elapsed.
                       </InfoButton></div>
                       <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
                         <li>Current Biomass: {(biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass).toFixed(2)} tons/ha</li>
@@ -2377,7 +2501,7 @@ const ndreArray = rasters[2];   // Red edge index`}
                     </div>
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>Canopy Parameters</strong> <InfoButton id="canopyParams" showInfo={showInfo} setShowInfo={setShowInfo}>
-                        Canopy cover = fraction of area under tree crowns derived from NDVI pixel thresholds. Crown diameter is modeled per species (pine 2–8m, fir 1.5–6m, birch 3–10m, aspen 2.5–9m) using a saturating exponential of forest age. Packing factor accounts for gaps between crowns (not all canopy area contains trees).
+                        Canopy cover = fraction of area under tree crowns derived from NDVI pixel thresholds. Crown diameter is modeled per species (pine 2–8m, spruce 1.5–6m, birch 3–10m, aspen 2.5–9m) using a saturating exponential of forest age. Packing factor accounts for gaps between crowns (not all canopy area contains trees).
                       </InfoButton></div>
                       <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
                         <li>Canopy Cover: {treeEstimate.canopyCover}%</li>
@@ -2761,13 +2885,13 @@ const ndreArray = rasters[2];   // Red edge index`}
                     </div>
                     <div style={styles.statCard}>
                       <div style={styles.statLabel}>Age/Maturity <InfoButton id="bioAge" showInfo={showInfo} setShowInfo={setShowInfo}>
-                        Ratio of current age to species mature age (pine 80yr, fir 90yr, birch 60yr, aspen 50yr). Older forests develop more structural complexity, deadwood, and ecological niches for epiphytes, cavity-nesting birds, and saproxylic insects.
+                        Ratio of current age to species mature age (pine 80yr, spruce 90yr, birch 60yr, aspen 50yr). Older forests develop more structural complexity, deadwood, and ecological niches for epiphytes, cavity-nesting birds, and saproxylic insects.
                       </InfoButton></div>
                       <div style={styles.statValue}>{biodiversityEstimate.ageFactor}</div>
                     </div>
                     <div style={styles.statCard}>
                       <div style={styles.statLabel}>Deadwood Potential <InfoButton id="bioDeadwood" showInfo={showInfo} setShowInfo={setShowInfo}>
-                        Deadwood is critical for ~25% of forest species in Finland. Estimated from forest age (older forests have more natural mortality) and NDVI spatial variance (indicates structural heterogeneity). "Likely" if age {'>'} species deadwood age and high NDVI variance. Deadwood ages: pine 100yr, fir 110yr, birch 70yr, aspen 60yr.
+                        Deadwood is critical for ~25% of forest species in Finland. Estimated from forest age (older forests have more natural mortality) and NDVI spatial variance (indicates structural heterogeneity). "Likely" if age {'>'} species deadwood age and high NDVI variance. Deadwood ages: pine 100yr, spruce 110yr, birch 70yr, aspen 60yr.
                       </InfoButton></div>
                       <div style={styles.statValue}>{biodiversityEstimate.deadwood}</div>
                     </div>

@@ -1,3 +1,7 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -10,4 +14,66 @@ body {
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
+}
+
+/* Landing page mobile responsive */
+@media (max-width: 768px) {
+  .landing-hamburger {
+    display: block !important;
+  }
+  .landing-nav-links {
+    display: none !important;
+    flex-direction: column;
+    position: absolute;
+    top: 64px;
+    left: 0;
+    right: 0;
+    background: rgba(255,255,255,0.98);
+    backdrop-filter: blur(8px);
+    padding: 16px 24px;
+    gap: 8px;
+    border-bottom: 1px solid #e5e7eb;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  }
+  .landing-nav-links.open {
+    display: flex !important;
+  }
+  .landing-nav-links button {
+    width: 100%;
+    text-align: center;
+    padding: 12px !important;
+  }
+  .landing-hero {
+    padding-top: 88px !important;
+    padding-bottom: 48px !important;
+    gap: 32px !important;
+  }
+  .landing-hero-title {
+    font-size: 32px !important;
+  }
+  .landing-hero-sub {
+    font-size: 16px !important;
+  }
+  .landing-hero-visual {
+    max-width: 100% !important;
+    flex-basis: 100% !important;
+  }
+  .landing-mock-map-stats {
+    flex-direction: column !important;
+  }
+  .landing-mock-stats-row {
+    flex-wrap: wrap !important;
+  }
+  .landing-mock-stats-row > div {
+    flex: 1 1 40% !important;
+  }
+  .landing-section-title {
+    font-size: 28px !important;
+  }
+  .landing-pricing-card-pro {
+    transform: none !important;
+  }
+  .landing-login-card {
+    padding: 24px !important;
+  }
 }
