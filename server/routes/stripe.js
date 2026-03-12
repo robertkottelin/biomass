@@ -23,6 +23,14 @@ function getPlanFromPriceId(priceId) {
   return null;
 }
 
+// GET /api/stripe/config — public price IDs
+router.get('/config', (req, res) => {
+  res.json({
+    proPriceId: process.env.STRIPE_PRO_PRICE_ID,
+    businessPriceId: process.env.STRIPE_BUSINESS_PRICE_ID,
+  });
+});
+
 // POST /api/stripe/create-checkout-session
 router.post('/create-checkout-session', requireAuth, async (req, res, next) => {
   try {
@@ -47,14 +55,26 @@ router.post('/create-checkout-session', requireAuth, async (req, res, next) => {
       await db('users').where('id', user.id).update({ stripe_customer_id: customerId });
     }
 
+    // Schedule cancellation of existing subscription (if upgrading)
+    const existingSub = await db('subscriptions')
+      .where({ user_id: user.id, status: 'active' })
+      .whereNotNull('stripe_subscription_id')
+      .first();
+
+    if (existingSub) {
+      await stripe.subscriptions.update(existingSub.stripe_subscription_id, {
+        cancel_at_period_end: true,
+      });
+    }
+
     const origin = process.env.APP_URL || 'http://localhost:3000';
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${origin}/?session_id={CHECKOUT_SESSION_ID}&status=success`,
-      cancel_url: `${origin}/?status=cancelled`,
+      success_url: `${origin}/app?session_id={CHECKOUT_SESSION_ID}&status=success`,
+      cancel_url: `${origin}/app?status=cancelled`,
       metadata: { userId: String(user.id) },
     });
 
@@ -175,7 +195,7 @@ router.post('/create-portal-session', requireAuth, async (req, res, next) => {
 
     const session = await stripe.billingPortal.sessions.create({
       customer: user.stripe_customer_id,
-      return_url: origin,
+      return_url: `${origin}/app`,
     });
 
     res.json({ url: session.url });

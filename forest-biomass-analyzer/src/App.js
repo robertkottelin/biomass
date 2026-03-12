@@ -14,6 +14,7 @@ import { calculateInheritanceTax, projectManagementScenarios, generateAssetSumma
 import { estimateTimberValue, biomassToCarbon, estimateCarbonCreditValue, EU_ETS_PRICE_PER_TON, BASIC_DENSITY } from './carbonCalculation';
 import { estimateForestAge } from './ageEstimation';
 import { useAuth } from './AuthContext';
+import { useCheckout } from './useCheckout';
 import LandingPage from './LandingPage';
 import Login from './Login';
 import UpgradeBanner from './UpgradeBanner';
@@ -177,8 +178,11 @@ const colors = {
 const dashFontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 
 const ForestBiomassApp = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
+  const { startCheckout, loading: checkoutLoading } = useCheckout();
   const isDemo = !user || user.plan === 'free';
+  const [checkoutSuccess, setCheckoutSuccess] = useState(false);
+  const [billingLoading, setBillingLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [pdfProgress, setPdfProgress] = useState('');
   const [selectedForests, setSelectedForests] = useState([]);
@@ -218,6 +222,27 @@ const ForestBiomassApp = () => {
   useEffect(() => {
     fetchSavedForests();
   }, [fetchSavedForests]);
+
+  // Handle post-checkout success
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('status') === 'success') {
+      setCheckoutSuccess(true);
+      refreshUser();
+      window.history.replaceState({}, '', '/app');
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openBillingPortal = async () => {
+    setBillingLoading(true);
+    try {
+      const data = await api.post('/api/stripe/create-portal-session', {});
+      window.location.href = data.url;
+    } catch (err) {
+      alert('Failed to open billing portal: ' + err.message);
+      setBillingLoading(false);
+    }
+  };
 
   // Save the current analyzed forest
   const saveCurrentForest = async () => {
@@ -1336,7 +1361,7 @@ const ForestBiomassApp = () => {
     <>
       <nav style={styles.dashNav}>
         <div style={styles.dashNavInner}>
-          <a href="/" style={styles.dashBrand}>{'\uD83C\uDF32'} MetsaData</a>
+          <a href="/" style={styles.dashBrand}>{'\uD83C\uDF32'} ForestData</a>
           <div style={styles.dashNavRight}>
             <a href="/" style={styles.dashNavLink}>Home</a>
             {user && <>
@@ -1354,17 +1379,46 @@ const ForestBiomassApp = () => {
                 {user.plan === 'business' ? 'Business' : user.plan === 'pro' ? 'Pro' : 'Free'}
               </span>
               {user.plan !== 'business' && (
-                <a href="/#pricing" style={{
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  padding: '4px 10px',
-                  borderRadius: '5px',
-                  background: '#fbbf24',
-                  color: colors.darkGreen,
-                  textDecoration: 'none',
-                  cursor: 'pointer',
-                  fontFamily: dashFontFamily,
-                }}>Upgrade</a>
+                <button
+                  onClick={() => {
+                    if (user.plan === 'pro') {
+                      startCheckout('business');
+                    } else {
+                      window.location.href = '/#pricing';
+                    }
+                  }}
+                  disabled={checkoutLoading}
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    padding: '4px 10px',
+                    borderRadius: '5px',
+                    background: '#fbbf24',
+                    color: colors.darkGreen,
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontFamily: dashFontFamily,
+                  }}>
+                  {checkoutLoading ? 'Loading...' : user.plan === 'pro' ? 'Upgrade to Business' : 'Upgrade'}
+                </button>
+              )}
+              {user.hasStripeCustomer && (
+                <button
+                  onClick={openBillingPortal}
+                  disabled={billingLoading}
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    padding: '4px 10px',
+                    borderRadius: '5px',
+                    background: 'rgba(255,255,255,0.15)',
+                    color: 'rgba(255,255,255,0.9)',
+                    border: '1px solid rgba(255,255,255,0.3)',
+                    cursor: 'pointer',
+                    fontFamily: dashFontFamily,
+                  }}>
+                  {billingLoading ? 'Loading...' : 'Manage Billing'}
+                </button>
               )}
               <button style={styles.dashNavLogout} onClick={logout}>Logout</button>
             </>}
@@ -1374,6 +1428,37 @@ const ForestBiomassApp = () => {
       <div style={styles.container}>
       <h1 style={styles.header}>Forest Analysis Dashboard</h1>
 
+      {checkoutSuccess && (
+        <div style={{
+          background: '#dcfce7',
+          color: '#166534',
+          padding: '12px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '12px',
+          fontSize: '14px',
+          fontFamily: dashFontFamily,
+          borderBottom: '1px solid #bbf7d0',
+        }}>
+          <span>Subscription activated! Your plan has been upgraded.</span>
+          <button
+            onClick={() => setCheckoutSuccess(false)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#166534',
+              fontSize: '18px',
+              cursor: 'pointer',
+              padding: '0 4px',
+              lineHeight: 1,
+            }}
+            type="button"
+          >
+            {'\u00D7'}
+          </button>
+        </div>
+      )}
       {isDemo && <UpgradeBanner plan={user ? user.plan : null} />}
 
       {/* User Instructions Panel */}
@@ -1584,7 +1669,7 @@ SCL (Scene Classification Layer): Cloud/snow/water mask - 20m resolution`}
             <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>3. Data Acquisition Pipeline</h3>
 
             <h4>Authentication:</h4>
-            <p>Sentinel Hub credentials are managed server-side. The backend authenticates with the Copernicus Data Space using OAuth2 client credentials and caches the access token. Users authenticate with MetsaData via email/password login (JWT stored in httpOnly cookies).</p>
+            <p>Sentinel Hub credentials are managed server-side. The backend authenticates with the Copernicus Data Space using OAuth2 client credentials and caches the access token. Users authenticate with ForestData via email/password login (JWT stored in httpOnly cookies).</p>
 
             <h4>Step 1: Discovery - Catalog API</h4>
             <pre style={styles.codeBlock}>

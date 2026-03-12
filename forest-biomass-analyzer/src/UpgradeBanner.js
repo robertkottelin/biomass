@@ -52,16 +52,18 @@ export default function UpgradeBanner({ plan }) {
   if (dismissed) return null;
   if (plan && plan !== 'free') return null;
 
-  const href = user ? '/#pricing' : '/login';
-
   return (
     <div style={styles.banner}>
       <span style={styles.text}>
         You're using the free demo with sample data. Upgrade to Pro for real satellite analysis.
       </span>
-      <a href={href} style={styles.upgradeButton}>
+      <button
+        style={styles.upgradeButton}
+        onClick={() => { window.location.href = '/#pricing'; }}
+        type="button"
+      >
         Upgrade
-      </a>
+      </button>
       <button
         style={styles.closeButton}
         onClick={() => setDismissed(true)}

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
+import { useCheckout } from './useCheckout';
 
 const colors = {
   darkGreen: '#1a472a',
@@ -37,7 +38,7 @@ const faqData = [
   },
   {
     q: 'Do I need to install any software?',
-    a: 'No. MetsaData runs entirely in your web browser. Simply draw your forest boundary on the map and our cloud infrastructure handles all satellite data retrieval and processing.',
+    a: 'No. ForestData runs entirely in your web browser. Simply draw your forest boundary on the map and our cloud infrastructure handles all satellite data retrieval and processing.',
   },
 ];
 
@@ -77,6 +78,7 @@ const features = [
 export default function LandingPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { startCheckout, loading: checkoutLoading } = useCheckout();
   const [openFaq, setOpenFaq] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -94,7 +96,7 @@ export default function LandingPage() {
       <nav style={s.nav}>
         <div style={s.navInner}>
           <div style={s.brand} onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-            <span style={s.brandIcon}>{'\uD83C\uDF32'}</span> MetsaData
+            <span style={s.brandIcon}>{'\uD83C\uDF32'}</span> ForestData
           </div>
           <button
             style={s.hamburger}
@@ -235,10 +237,11 @@ export default function LandingPage() {
               </ul>
               <button
                 style={s.pricingBtnPro}
-                onClick={() => navigate('/login')}
+                onClick={() => startCheckout('pro')}
+                disabled={checkoutLoading}
                 type="button"
               >
-                Get Started
+                {checkoutLoading ? 'Please wait...' : 'Get Started'}
               </button>
             </div>
 
@@ -257,10 +260,11 @@ export default function LandingPage() {
               </ul>
               <button
                 style={s.pricingBtn}
-                onClick={() => navigate('/login')}
+                onClick={() => startCheckout('business')}
+                disabled={checkoutLoading}
                 type="button"
               >
-                Get Started
+                {checkoutLoading ? 'Please wait...' : 'Get Started'}
               </button>
             </div>
           </div>
@@ -316,7 +320,7 @@ export default function LandingPage() {
       <footer style={s.footer}>
         <div style={s.footerInner}>
           <div style={s.footerBrand}>
-            <span style={s.brandIcon}>{'\uD83C\uDF32'}</span> MetsaData
+            <span style={s.brandIcon}>{'\uD83C\uDF32'}</span> ForestData
           </div>
           <div style={s.footerLinks}>
             <button style={s.footerLink} onClick={() => scrollTo('features')} type="button">Features</button>
@@ -325,7 +329,7 @@ export default function LandingPage() {
             <button style={s.footerLink} onClick={() => navigate('/login')} type="button">Login</button>
           </div>
           <div style={s.footerCopy}>
-            {'\u00A9'} {new Date().getFullYear()} MetsaData. Forest Biomass Analyzer. All rights reserved.
+            {'\u00A9'} {new Date().getFullYear()} ForestData. Forest Biomass Analyzer. All rights reserved.
           </div>
         </div>
       </footer>

@@ -10,6 +10,7 @@ jest.mock('react-router-dom', () => ({
   Navigate: () => <div />,
   useNavigate: () => jest.fn(),
   useLocation: () => ({ pathname: '/' }),
+  useSearchParams: () => [new URLSearchParams(), jest.fn()],
   Link: ({ children, to }) => <a href={to}>{children}</a>,
 }));
 

@@ -1,5 +1,5 @@
 /**
- * PDF Export utility for MetsaData forest analysis reports.
+ * PDF Export utility for ForestData forest analysis reports.
  * Uses jspdf + html2canvas (dynamically imported to keep bundle small).
  */
 
@@ -23,7 +23,7 @@ export async function generatePdfReport({ title, forestType, forestAge, areaHect
 
   doc.setFontSize(24);
   doc.setTextColor(26, 71, 42); // #1a472a
-  doc.text('MetsaData Forest Analysis Report', marginX, 50);
+  doc.text('ForestData Forest Analysis Report', marginX, 50);
 
   doc.setFontSize(14);
   doc.setTextColor(80, 80, 80);
@@ -113,12 +113,12 @@ export async function generatePdfReport({ title, forestType, forestAge, areaHect
     doc.setPage(p);
     doc.setFontSize(9);
     doc.setTextColor(150, 150, 150);
-    const footerText = `MetsaData  |  Page ${p} of ${totalPages}  |  Generated ${generatedDate}`;
+    const footerText = `ForestData  |  Page ${p} of ${totalPages}  |  Generated ${generatedDate}`;
     const textWidth = doc.getTextWidth(footerText);
     doc.text(footerText, (297 - textWidth) / 2, 205);
   }
 
   // --- Save ---
   onProgress('Saving PDF...', 98);
-  doc.save(`metsadata-report-${generatedDate}.pdf`);
+  doc.save(`forestdata-report-${generatedDate}.pdf`);
 }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from './AuthContext';
+import { redirectToCheckout } from './useCheckout';
 
 const styles = {
   container: {
@@ -122,6 +123,8 @@ export default function Login() {
 
   const { login, register } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const planParam = searchParams.get('plan');
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -134,7 +137,12 @@ export default function Login() {
       } else {
         await register(email, password, name);
       }
-      navigate('/app');
+
+      if (planParam === 'pro' || planParam === 'business') {
+        await redirectToCheckout(planParam);
+      } else {
+        navigate('/app');
+      }
     } catch (err) {
       setError(err.message || 'Something went wrong. Please try again.');
     } finally {
@@ -150,7 +158,7 @@ export default function Login() {
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <div style={styles.logo}>MetsaData</div>
+        <div style={styles.logo}>ForestData</div>
         <div style={styles.subtitle}>Forest Biomass Analyzer</div>
 
         <div style={styles.tabs}>
