@@ -89,6 +89,9 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
   const firstHarvestAge = harvestRec.harvestYear;
   const rotationAge = harvestRec.rotationAge;
 
+  // Years from now until first harvest (min 1 — can't harvest at y=0)
+  const firstHarvestYear = Math.max(1, firstHarvestAge - forestAge);
+
   for (let y = 0; y <= years; y++) {
     const age = forestAge + y;
 
@@ -98,21 +101,37 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
     hold.push({ year: y, age, value: holdTimber.totalValue });
 
     // Active scenario: first harvest at recommended age, then every rotationAge
-    let activeAgeInCycle;
-    if (age < firstHarvestAge) {
-      activeAgeInCycle = age;
-    } else {
-      activeAgeInCycle = rotationAge > 0 ? (age - firstHarvestAge) % rotationAge : 0;
-    }
-    const isHarvestYear = y > 0 && ((age === firstHarvestAge) || (age > firstHarvestAge && rotationAge > 0 && activeAgeInCycle === 0));
+    // Before any harvest occurs, the forest grows normally from its current state
+    const isHarvestYear = y > 0 && (
+      y === firstHarvestYear ||
+      (y > firstHarvestYear && rotationAge > 0 && (y - firstHarvestYear) % rotationAge === 0)
+    );
     if (isHarvestYear) {
-      const harvestAge = age === firstHarvestAge ? firstHarvestAge : rotationAge;
-      const harvestBiomass = estimateBiomass(params.ndviSaturation, type, 0, harvestAge);
+      // At first harvest, use the grown forest; subsequent harvests use rotation-aged forest
+      const harvestAge = y === firstHarvestYear ? firstHarvestAge : rotationAge;
+      const harvestBiomass = y === firstHarvestYear
+        ? estimateBiomass(params.ndviSaturation, type, y, forestAge) * biomassScale
+        : estimateBiomass(params.ndviSaturation, type, 0, rotationAge);
       const harvestTimber = estimateTimberValue(harvestBiomass, type, harvestAge, areaHectares);
       activeCumulativeHarvest += harvestTimber.totalValue;
     }
-    const activeEffectiveAge = isHarvestYear ? 0 : (age < firstHarvestAge ? age : activeAgeInCycle);
-    const activeBiomass = estimateBiomass(params.ndviSaturation, type, 0, activeEffectiveAge);
+    let activeBiomass, activeEffectiveAge;
+    if (y <= firstHarvestYear && !isHarvestYear) {
+      // Before first harvest: forest grows from current state (same as hold)
+      activeBiomass = estimateBiomass(params.ndviSaturation, type, y, forestAge) * biomassScale;
+      activeEffectiveAge = age;
+    } else if (isHarvestYear) {
+      // Just harvested: standing timber is zero (replanted)
+      activeBiomass = estimateBiomass(params.ndviSaturation, type, 0, 0);
+      activeEffectiveAge = 0;
+    } else {
+      // Regrowth after harvest
+      const yearsSinceLastHarvest = firstHarvestYear >= 0
+        ? (y - firstHarvestYear) % rotationAge
+        : y % rotationAge;
+      activeEffectiveAge = yearsSinceLastHarvest;
+      activeBiomass = estimateBiomass(params.ndviSaturation, type, 0, yearsSinceLastHarvest);
+    }
     const activeTimber = estimateTimberValue(activeBiomass, type, activeEffectiveAge, areaHectares);
     active.push({ year: y, age, value: activeTimber.totalValue + activeCumulativeHarvest });
 

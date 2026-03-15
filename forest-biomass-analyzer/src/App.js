@@ -2332,6 +2332,56 @@ const ForestBiomassApp = () => {
                       })()}
                     </div>
                     <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>NDMI Statistics</strong> <InfoButton id="ndmiStats" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        NDMI (Normalized Difference Moisture Index) measures canopy water content using NIR and SWIR bands: (NIR − SWIR) / (NIR + SWIR). Higher values indicate more moisture. Typical range: -0.2 to 0.6 for forests.
+                      </InfoButton></div>
+                      {(() => {
+                        const ndmiData = biomassData.filter(d => d.ndmi != null);
+                        if (ndmiData.length === 0) return <ul style={{ margin: '5px 0', paddingLeft: '20px' }}><li>No NDMI data available</li></ul>;
+                        const mean = ndmiData.reduce((sum, d) => sum + d.ndmi, 0) / ndmiData.length;
+                        const stdDev = Math.sqrt(ndmiData.reduce((sum, d) => sum + Math.pow(d.ndmi - mean, 2), 0) / ndmiData.length);
+                        const firstVal = ndmiData[0].ndmi;
+                        const lastVal = ndmiData[ndmiData.length - 1].ndmi;
+                        const years = (new Date(ndmiData[ndmiData.length - 1].date) - new Date(ndmiData[0].date)) / 31536000000;
+                        const totalChange = years > 0 && firstVal !== 0 ? ((lastVal - firstVal) / Math.abs(firstVal)) * 100 : 0;
+                        const annualChange = years > 0 ? totalChange / years : 0;
+                        return (
+                      <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                        <li>Mean NDMI: {mean.toFixed(4)}</li>
+                        <li>NDMI Range: {Math.min(...ndmiData.map(d => d.ndmi)).toFixed(4)} to {Math.max(...ndmiData.map(d => d.ndmi)).toFixed(4)}</li>
+                        <li>NDMI Std Dev: {stdDev.toFixed(4)}</li>
+                        <li>NDMI Change/Year: {annualChange >= 0 ? '+' : ''}{annualChange.toFixed(2)}%</li>
+                        <li>Total NDMI Change: {totalChange >= 0 ? '+' : ''}{totalChange.toFixed(2)}% ({years.toFixed(1)} years)</li>
+                      </ul>
+                        );
+                      })()}
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>NDRE Statistics</strong> <InfoButton id="ndreStats" showInfo={showInfo} setShowInfo={setShowInfo}>
+                        NDRE (Normalized Difference Red Edge) measures chlorophyll density using red-edge and NIR bands: (NIR − RedEdge) / (NIR + RedEdge). It penetrates canopy better than NDVI and doesn't saturate as easily in dense forests. Typical range: 0.2 to 0.8.
+                      </InfoButton></div>
+                      {(() => {
+                        const ndreData = biomassData.filter(d => d.ndre != null);
+                        if (ndreData.length === 0) return <ul style={{ margin: '5px 0', paddingLeft: '20px' }}><li>No NDRE data available</li></ul>;
+                        const mean = ndreData.reduce((sum, d) => sum + d.ndre, 0) / ndreData.length;
+                        const stdDev = Math.sqrt(ndreData.reduce((sum, d) => sum + Math.pow(d.ndre - mean, 2), 0) / ndreData.length);
+                        const firstVal = ndreData[0].ndre;
+                        const lastVal = ndreData[ndreData.length - 1].ndre;
+                        const years = (new Date(ndreData[ndreData.length - 1].date) - new Date(ndreData[0].date)) / 31536000000;
+                        const totalChange = years > 0 && firstVal > 0 ? ((lastVal - firstVal) / firstVal) * 100 : 0;
+                        const annualChange = years > 0 ? totalChange / years : 0;
+                        return (
+                      <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                        <li>Mean NDRE: {mean.toFixed(4)}</li>
+                        <li>NDRE Range: {Math.min(...ndreData.map(d => d.ndre)).toFixed(4)} to {Math.max(...ndreData.map(d => d.ndre)).toFixed(4)}</li>
+                        <li>NDRE Std Dev: {stdDev.toFixed(4)}</li>
+                        <li>NDRE Change/Year: {annualChange >= 0 ? '+' : ''}{annualChange.toFixed(2)}%</li>
+                        <li>Total NDRE Change: {totalChange >= 0 ? '+' : ''}{totalChange.toFixed(2)}% ({years.toFixed(1)} years)</li>
+                      </ul>
+                        );
+                      })()}
+                    </div>
+                    <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>Biomass Estimates</strong> <InfoButton id="biomassEstimates" showInfo={showInfo} setShowInfo={setShowInfo}>
                         Biomass (tons/ha) is estimated from each NDVI reading using a logistic growth curve calibrated per species. Parameters: pine max 450 t/ha at growth rate 0.08, spruce 500 t/ha at 0.07, birch 300 t/ha at 0.12, aspen 250 t/ha at 0.15. Current and initial values are the last and first observations. Annual growth rate = (current − initial) / years elapsed.
                       </InfoButton></div>
