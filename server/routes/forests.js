@@ -109,6 +109,9 @@ router.get('/:id', requireAuth, async (req, res, next) => {
             biomass_data: latestAnalysis.biomass_data_json
               ? JSON.parse(latestAnalysis.biomass_data_json)
               : null,
+            stats_data: latestAnalysis.stats_data_json
+              ? JSON.parse(latestAnalysis.stats_data_json)
+              : null,
             created_at: latestAnalysis.created_at,
           }
         : null,
@@ -150,7 +153,7 @@ router.post('/:id/analyses', requireAuth, async (req, res, next) => {
       return res.status(404).json({ error: 'Forest not found' });
     }
 
-    const { ndvi_data_json, biomass_data_json } = req.body;
+    const { ndvi_data_json, biomass_data_json, stats_data_json } = req.body;
 
     const ndviStr =
       typeof ndvi_data_json === 'string' ? ndvi_data_json : JSON.stringify(ndvi_data_json);
@@ -158,15 +161,70 @@ router.post('/:id/analyses', requireAuth, async (req, res, next) => {
       typeof biomass_data_json === 'string'
         ? biomass_data_json
         : JSON.stringify(biomass_data_json);
+    const statsStr = stats_data_json
+      ? (typeof stats_data_json === 'string' ? stats_data_json : JSON.stringify(stats_data_json))
+      : null;
 
     const [id] = await db('analyses').insert({
       forest_id: forest.id,
       ndvi_data_json: ndviStr,
       biomass_data_json: biomassStr,
+      stats_data_json: statsStr,
     });
     logger.info('Analysis saved', { analysisId: id, forestId: forest.id, userId: req.user.id });
 
     res.status(201).json({
+      analysis: { id, forest_id: forest.id, created_at: new Date().toISOString() },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/forests/:id/analyses — upsert today's analysis (auto-save on refresh)
+router.put('/:id/analyses', requireAuth, async (req, res, next) => {
+  try {
+    const forest = await db('forests')
+      .where({ id: req.params.id, user_id: req.user.id })
+      .first();
+
+    if (!forest) {
+      return res.status(404).json({ error: 'Forest not found' });
+    }
+
+    const { biomass_data_json, stats_data_json } = req.body;
+
+    const biomassStr = biomass_data_json
+      ? (typeof biomass_data_json === 'string' ? biomass_data_json : JSON.stringify(biomass_data_json))
+      : null;
+    const statsStr = stats_data_json
+      ? (typeof stats_data_json === 'string' ? stats_data_json : JSON.stringify(stats_data_json))
+      : null;
+
+    // Check for existing analysis from today
+    const today = new Date().toISOString().split('T')[0];
+    const existing = await db('analyses')
+      .where('forest_id', forest.id)
+      .andWhere('created_at', '>=', today)
+      .first();
+
+    let id;
+    if (existing) {
+      await db('analyses').where('id', existing.id).update({
+        ...(biomassStr != null && { biomass_data_json: biomassStr }),
+        ...(statsStr != null && { stats_data_json: statsStr }),
+      });
+      id = existing.id;
+    } else {
+      [id] = await db('analyses').insert({
+        forest_id: forest.id,
+        biomass_data_json: biomassStr,
+        stats_data_json: statsStr,
+      });
+    }
+
+    logger.info('Analysis auto-saved', { analysisId: id, forestId: forest.id, userId: req.user.id });
+    res.json({
       analysis: { id, forest_id: forest.id, created_at: new Date().toISOString() },
     });
   } catch (err) {

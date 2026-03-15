@@ -38,6 +38,18 @@ const api = {
     }).then(handleResponse);
   },
 
+  put(path, body) {
+    return fetch(`${BASE_URL}${path}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(body),
+    }).then(handleResponse);
+  },
+
   del(path) {
     return fetch(`${BASE_URL}${path}`, {
       method: 'DELETE',

@@ -201,7 +201,13 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
             {forestValueData ? (forestValueData.harvestRec.yearsFromNow === 0 ? 'Now' : `In ${forestValueData.harvestRec.yearsFromNow} yr`) : '—'}
           </div>
           <div style={cardSubStyle}>Age {forestValueData ? forestValueData.harvestRec.harvestYear : '—'} · €{forestValueData ? forestValueData.harvestRec.valueAtHarvest.toFixed(0) : '0'}</div>
-          <div style={cardSubStyle}>Growth: {forestValueData ? (forestValueData.harvestRec.annualGrowthRate * 100).toFixed(1) : '0'}%/yr</div>
+          <div style={{ ...cardSubStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>Growth: {forestValueData ? (forestValueData.harvestRec.annualGrowthRate * 100).toFixed(1) : '0'}%/yr <InfoButton id="timberGrowthRate" showInfo={showInfo} setShowInfo={setShowInfo}>
+            This is the <strong>timber value growth rate at the current age</strong> — the projected increase in your standing timber's monetary value if you wait one more year from now, expressed as a percentage of current value. It is not the same as biomass growth or NDVI change, and it is not the growth rate at the recommended harvest year.
+            <br /><br />
+            The rate accounts for projected biomass accumulation (with growth dampening over time), species-specific timber prices, and age-dependent maturity premiums. It typically decreases as the forest matures and approaches its biological maximum.
+            <br /><br />
+            <strong>How to use it:</strong> Compare this rate against your cost of capital (e.g. 3–5% for most forestry investments). When the timber value growth rate drops below your discount rate, the forest is no longer earning enough to justify delaying harvest — that is the economic signal to cut. A high current growth rate supports the "Wait" recommendation above; a low rate confirms it is time to harvest. The "Optimal Harvest" recommendation already incorporates this logic via two-generation NPV optimization.
+          </InfoButton></div>
           {siteQuality && (
             <div style={{ marginTop: '6px' }}>
               <span style={{

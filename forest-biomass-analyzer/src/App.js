@@ -204,6 +204,7 @@ const ForestBiomassApp = () => {
   const [healthEstimate, setHealthEstimate] = useState(null);
   const [biodiversityEstimate, setBiodiversityEstimate] = useState(null);
   const [showInfo, setShowInfo] = useState({});
+  const [successionValueMode, setSuccessionValueMode] = useState('timber');
   const [estimateAgeMode, setEstimateAgeMode] = useState(false);
   const [ageEstimate, setAgeEstimate] = useState(null);
   const [savedForests, setSavedForests] = useState([]);
@@ -309,9 +310,10 @@ const ForestBiomassApp = () => {
       });
 
       // Save analysis data if available
-      if (biomassData.length > 0) {
+      if (biomassData.length > 0 || vegetationStats) {
         await api.post(`/api/forests/${result.forest.id}/analyses`, {
           biomass_data_json: biomassData,
+          stats_data_json: vegetationStats,
         });
       }
 
@@ -354,6 +356,10 @@ const ForestBiomassApp = () => {
       setForestAge(forest.forest_age || 20);
       setLoadedForestId(forestId);
 
+      // Restore cached vegetation stats
+      const loadedStats = data.analysis?.stats_data || null;
+      setVegetationStats(loadedStats);
+
       if (data.analysis && data.analysis.biomass_data) {
         const finalResults = data.analysis.biomass_data;
         setBiomassData(finalResults);
@@ -369,7 +375,7 @@ const ForestBiomassApp = () => {
         const healthResult = analyzeForestHealth(finalResults, type, age);
         setHealthEstimate(healthResult);
 
-        const bioEst = estimateBiodiversity(finalResults, treeEst, healthResult, type, age, area, vegetationStats);
+        const bioEst = estimateBiodiversity(finalResults, treeEst, healthResult, type, age, area, loadedStats);
         setBiodiversityEstimate(bioEst);
       } else {
         setBiomassData([]);
@@ -932,6 +938,14 @@ const ForestBiomassApp = () => {
 
       setProcessingStatus('');
 
+      // Auto-save updated analysis to DB if this is a saved forest
+      if (loadedForestId) {
+        api.put(`/api/forests/${loadedForestId}/analyses`, {
+          biomass_data_json: finalResults,
+          stats_data_json: vegetationStats,
+        }).catch(() => {}); // silent — best effort
+      }
+
       // Vegetation coverage analysis
       const vegetatedCount = finalResults.filter(d => d.isForested).length;
       const vegPercent = (vegetatedCount / finalResults.length * 100).toFixed(1);
@@ -991,6 +1005,14 @@ const ForestBiomassApp = () => {
 
       const data = await api.post('/api/sentinel/statistics', { geometry, dateFrom, dateTo });
       setVegetationStats(data);
+
+      // Auto-save updated stats to DB if this is a saved forest
+      if (loadedForestId) {
+        api.put(`/api/forests/${loadedForestId}/analyses`, {
+          biomass_data_json: biomassData,
+          stats_data_json: data,
+        }).catch(() => {}); // silent — best effort
+      }
     } catch (err) {
       setError(`Statistics error: ${err.message}`);
     } finally {
@@ -2061,7 +2083,7 @@ const ForestBiomassApp = () => {
           onClick={isDemo ? loadDemoData : fetchSatelliteData}
           disabled={loading || (selectedForests.length === 0 && !isDemo) || (!isDemo && !estimateAgeMode && (forestAge === '' || forestAge == null))}
         >
-          {loading ? 'Processing Satellite Data...' : isDemo ? 'Load Demo Analysis' : 'Analyze with Sentinel-2 Process API'}
+          {loading ? 'Processing Satellite Data...' : isDemo ? 'Load Demo Analysis' : biomassData.length > 0 ? 'Update Satellite Analysis' : 'Analyze with Sentinel-2 Process API'}
         </button>
         {loading && !isDemo && (
           <button
@@ -2096,7 +2118,7 @@ const ForestBiomassApp = () => {
           onClick={fetchVegetationStats}
           disabled={statsLoading || (!isDemo && selectedForests.length === 0)}
         >
-          {statsLoading ? 'Loading Statistics...' : 'Get Detailed Statistics'}
+          {statsLoading ? 'Loading Statistics...' : vegetationStats ? 'Update Statistics' : 'Get Detailed Statistics'}
         </button>
       </div>
 
@@ -3133,7 +3155,7 @@ const ForestBiomassApp = () => {
 
               const assetSummary = generateAssetSummary(timberVal.totalValue, landVal, creditVal.totalValue, currentArea);
               const inheritanceTax = calculateInheritanceTax(assetSummary.totalValue);
-              const scenarios = projectManagementScenarios(currentType, forestAge, currentArea, 30, { currentBiomass: latestBiomass });
+              const scenarios = projectManagementScenarios(currentType, forestAge, currentArea, 30, { currentBiomass: latestBiomass, valueMode: successionValueMode });
               const activeWorkload = estimateManagementWorkload(currentArea, 'active');
               const holdWorkload = estimateManagementWorkload(currentArea, 'hold');
 
@@ -3212,12 +3234,35 @@ const ForestBiomassApp = () => {
                     </div>
 
                     {/* Management Scenarios Chart */}
-                    <h5 style={{ margin: '0 0 5px 0', color: '#333', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      30-Year Management Scenarios
-                      <InfoButton id="succScenarios" showInfo={showInfo} setShowInfo={setShowInfo}>
-                        Three strategies compared over 30 years. "Active" = harvest at optimal rotation age, replant, accumulate harvest income. "Hold" = let forest grow undisturbed. "Sell + Invest" = sell timber now, invest proceeds at 5% annual market return. Values include both standing timber and cumulative income (for active strategy).
-                      </InfoButton>
-                    </h5>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', margin: '0 0 5px 0' }}>
+                      <h5 style={{ margin: 0, color: '#333', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        30-Year Management Scenarios ({successionValueMode === 'carbon' ? 'Carbon Credit' : 'Timber'} Value)
+                        <InfoButton id="succScenarios" showInfo={showInfo} setShowInfo={setShowInfo}>
+                          Three strategies compared over 30 years. "Active" = harvest at optimal rotation age, replant, accumulate harvest income. "Hold" = let forest grow undisturbed. "Sell + Invest" = sell now, invest proceeds at 5% annual market return. Toggle between timber sale value and carbon credit value to compare strategies.
+                        </InfoButton>
+                      </h5>
+                      <div style={{ display: 'flex', borderRadius: '6px', overflow: 'hidden', border: '1px solid #d1d5db', fontSize: '12px' }}>
+                        <button
+                          onClick={() => setSuccessionValueMode('timber')}
+                          style={{
+                            padding: '4px 12px', border: 'none', cursor: 'pointer',
+                            background: successionValueMode === 'timber' ? '#27ae60' : '#f3f4f6',
+                            color: successionValueMode === 'timber' ? '#fff' : '#374151',
+                            fontWeight: successionValueMode === 'timber' ? 600 : 400
+                          }}
+                        >Timber</button>
+                        <button
+                          onClick={() => setSuccessionValueMode('carbon')}
+                          style={{
+                            padding: '4px 12px', border: 'none', cursor: 'pointer',
+                            borderLeft: '1px solid #d1d5db',
+                            background: successionValueMode === 'carbon' ? '#27ae60' : '#f3f4f6',
+                            color: successionValueMode === 'carbon' ? '#fff' : '#374151',
+                            fontWeight: successionValueMode === 'carbon' ? 600 : 400
+                          }}
+                        >Carbon</button>
+                      </div>
+                    </div>
                     <ResponsiveContainer width="100%" height={300}>
                       <LineChart data={scenarioChartData}>
                         <CartesianGrid strokeDasharray="3 3" />

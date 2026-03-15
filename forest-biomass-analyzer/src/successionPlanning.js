@@ -73,12 +73,22 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
   const params = forestParams[type];
   const discountRate = FORESTRY_DISCOUNT_RATE;
   const marketReturn = 0.05; // 5% long-term equity return
+  const valueMode = options.valueMode || 'timber'; // 'timber' or 'carbon'
+
+  // Valuation helper — returns € value for a given biomass
+  const valuate = (biomass, age, area) => {
+    if (valueMode === 'carbon') {
+      const carbon = biomassToCarbon(biomass, type);
+      return estimateCarbonCreditValue(carbon.co2eTons * area).totalValue;
+    }
+    return estimateTimberValue(biomass, type, age, area).totalValue;
+  };
 
   // Current value — use observed biomass when available, theoretical as fallback
   const theoreticalBiomass = estimateBiomass(params.ndviSaturation, type, 0, forestAge);
   const currentBiomass = options.currentBiomass || theoreticalBiomass;
   const biomassScale = theoreticalBiomass > 0 ? currentBiomass / theoreticalBiomass : 1;
-  const currentTimber = estimateTimberValue(currentBiomass, type, forestAge, areaHectares);
+  const currentValue = valuate(currentBiomass, forestAge, areaHectares);
 
   const active = [];
   const hold = [];
@@ -97,8 +107,7 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
 
     // Hold scenario: forest grows, no harvest (scaled to observed biomass)
     const holdBiomass = estimateBiomass(params.ndviSaturation, type, y, forestAge) * biomassScale;
-    const holdTimber = estimateTimberValue(holdBiomass, type, age, areaHectares);
-    hold.push({ year: y, age, value: holdTimber.totalValue });
+    hold.push({ year: y, age, value: valuate(holdBiomass, age, areaHectares) });
 
     // Active scenario: first harvest at recommended age, then every rotationAge
     // Before any harvest occurs, the forest grows normally from its current state
@@ -112,8 +121,7 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
       const harvestBiomass = y === firstHarvestYear
         ? estimateBiomass(params.ndviSaturation, type, y, forestAge) * biomassScale
         : estimateBiomass(params.ndviSaturation, type, 0, rotationAge);
-      const harvestTimber = estimateTimberValue(harvestBiomass, type, harvestAge, areaHectares);
-      activeCumulativeHarvest += harvestTimber.totalValue;
+      activeCumulativeHarvest += valuate(harvestBiomass, harvestAge, areaHectares);
     }
     let activeBiomass, activeEffectiveAge;
     if (y <= firstHarvestYear && !isHarvestYear) {
@@ -132,18 +140,19 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
       activeEffectiveAge = yearsSinceLastHarvest;
       activeBiomass = estimateBiomass(params.ndviSaturation, type, 0, yearsSinceLastHarvest);
     }
-    const activeTimber = estimateTimberValue(activeBiomass, type, activeEffectiveAge, areaHectares);
-    active.push({ year: y, age, value: activeTimber.totalValue + activeCumulativeHarvest });
+    active.push({ year: y, age, value: valuate(activeBiomass, activeEffectiveAge, areaHectares) + activeCumulativeHarvest });
 
     // Sell + Invest: compound at market return
-    const investedValue = currentTimber.totalValue * Math.pow(1 + marketReturn, y);
+    const investedValue = currentValue * Math.pow(1 + marketReturn, y);
     sellInvest.push({ year: y, age, value: investedValue });
   }
 
+  const modeLabel = valueMode === 'carbon' ? 'Carbon Credit' : 'Timber';
   return {
     active: { data: active, label: 'Active Management', description: `Harvest at age ${firstHarvestAge}, then every ${rotationAge}yr` },
-    hold: { data: hold, label: 'Hold (No Harvest)', description: 'Let forest grow, no harvesting' },
-    sellInvest: { data: sellInvest, label: 'Sell + Invest', description: `Sell now (€${currentTimber.totalValue.toFixed(0)}), invest at ${(marketReturn * 100)}%` }
+    hold: { data: hold, label: 'Hold (No Harvest)', description: `Let forest grow, value as ${modeLabel.toLowerCase()}` },
+    sellInvest: { data: sellInvest, label: 'Sell + Invest', description: `Sell now (€${currentValue.toFixed(0)}), invest at ${(marketReturn * 100)}%` },
+    valueMode
   };
 }
 
