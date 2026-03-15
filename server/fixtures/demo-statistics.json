@@ -1,0 +1,1140 @@
+{
+  "data": [
+    {
+      "interval": { "from": "2023-04-22T00:00:00Z", "to": "2023-04-23T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": {
+            "B0": {
+              "stats": { "min": 0.28, "max": 0.62, "mean": 0.44, "stDev": 0.11, "sampleCount": 2500, "noDataCount": 358 },
+              "histogram": {
+                "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 12 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 25 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 48 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 135 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 380 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 590 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 520 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 310 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 98 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 24 }
+                ],
+                "overflowCount": 0, "underflowCount": 0
+              },
+              "percentiles": { "5.0": 0.22, "25.0": 0.35, "50.0": 0.44, "75.0": 0.54, "95.0": 0.66 }
+            }
+          }
+        },
+        "ndmi": {
+          "bands": {
+            "B0": {
+              "stats": { "min": 0.05, "max": 0.38, "mean": 0.22, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 358 },
+              "histogram": {
+                "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 65 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 140 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 310 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 520 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 480 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 350 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 180 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 72 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 20 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 5 }
+                ],
+                "overflowCount": 0, "underflowCount": 0
+              },
+              "percentiles": { "5.0": 0.08, "25.0": 0.15, "50.0": 0.22, "75.0": 0.29, "95.0": 0.37 }
+            }
+          }
+        },
+        "ndre": {
+          "bands": {
+            "B0": {
+              "stats": { "min": 0.08, "max": 0.40, "mean": 0.24, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 358 },
+              "histogram": {
+                "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 45 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 120 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 285 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 510 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 500 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 340 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 195 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 95 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 40 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 12 }
+                ],
+                "overflowCount": 0, "underflowCount": 0
+              },
+              "percentiles": { "5.0": 0.10, "25.0": 0.17, "50.0": 0.24, "75.0": 0.31, "95.0": 0.40 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2023-05-14T00:00:00Z", "to": "2023-05-15T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.32, "max": 0.69, "mean": 0.52, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 290 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 8 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 15 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 30 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 75 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 250 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 520 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 680 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 480 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 120 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 32 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.30, "25.0": 0.43, "50.0": 0.52, "75.0": 0.62, "95.0": 0.73 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.10, "max": 0.42, "mean": 0.28, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 290 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 30 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 85 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 210 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 410 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 560 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 450 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 280 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 110 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 55 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 20 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.12, "25.0": 0.20, "50.0": 0.28, "75.0": 0.35, "95.0": 0.43 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.12, "max": 0.44, "mean": 0.29, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 290 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 20 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 65 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 180 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 390 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 560 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 480 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 310 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 140 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 48 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 17 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.13, "25.0": 0.21, "50.0": 0.29, "75.0": 0.36, "95.0": 0.44 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2023-06-08T00:00:00Z", "to": "2023-06-09T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.38, "max": 0.78, "mean": 0.65, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 120 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 5 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 8 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 12 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 35 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 110 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 280 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 520 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 780 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 480 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 150 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.40, "25.0": 0.56, "50.0": 0.65, "75.0": 0.74, "95.0": 0.84 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.18, "max": 0.52, "mean": 0.37, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 120 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 10 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 28 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 80 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 195 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 360 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 520 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 540 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 380 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 195 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 72 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.18, "25.0": 0.29, "50.0": 0.37, "75.0": 0.44, "95.0": 0.52 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.18, "max": 0.52, "mean": 0.35, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 120 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 8 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 22 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 75 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 210 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 410 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 530 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 490 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 340 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 210 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 85 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.17, "25.0": 0.27, "50.0": 0.35, "75.0": 0.42, "95.0": 0.52 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2023-06-16T00:00:00Z", "to": "2023-06-17T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.40, "max": 0.82, "mean": 0.70, "stDev": 0.11, "sampleCount": 2500, "noDataCount": 275 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 3 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 5 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 10 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 22 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 65 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 180 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 370 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 720 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 640 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 210 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.44, "25.0": 0.61, "50.0": 0.70, "75.0": 0.79, "95.0": 0.88 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.22, "max": 0.56, "mean": 0.40, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 275 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 5 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 15 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 45 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 130 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 280 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 430 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 540 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 430 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 240 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 110 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.22, "25.0": 0.32, "50.0": 0.40, "75.0": 0.47, "95.0": 0.55 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.20, "max": 0.54, "mean": 0.38, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 275 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 5 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 18 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 55 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 150 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 320 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 480 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 520 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 380 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 215 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 82 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.20, "25.0": 0.30, "50.0": 0.38, "75.0": 0.45, "95.0": 0.53 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2023-07-05T00:00:00Z", "to": "2023-07-06T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.42, "max": 0.84, "mean": 0.72, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 171 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 2 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 4 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 8 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 18 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 48 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 140 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 310 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 690 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 720 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 389 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.48, "25.0": 0.64, "50.0": 0.72, "75.0": 0.81, "95.0": 0.90 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.20, "max": 0.55, "mean": 0.39, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 171 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 8 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 22 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 60 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 155 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 310 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 460 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 520 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 410 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 260 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 124 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.19, "25.0": 0.30, "50.0": 0.39, "75.0": 0.46, "95.0": 0.54 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.22, "max": 0.56, "mean": 0.40, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 171 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 5 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 15 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 48 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 140 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 290 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 470 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 530 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 420 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 270 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 141 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.21, "25.0": 0.32, "50.0": 0.40, "75.0": 0.47, "95.0": 0.55 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2023-07-21T00:00:00Z", "to": "2023-07-22T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.45, "max": 0.86, "mean": 0.73, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 329 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 2 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 3 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 6 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 15 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 40 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 120 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 285 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 660 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 750 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 290 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.50, "25.0": 0.65, "50.0": 0.73, "75.0": 0.82, "95.0": 0.90 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.22, "max": 0.56, "mean": 0.42, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 329 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 5 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 15 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 40 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 110 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 240 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 390 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 510 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 460 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 290 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 111 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.22, "25.0": 0.34, "50.0": 0.42, "75.0": 0.49, "95.0": 0.56 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.24, "max": 0.56, "mean": 0.42, "stDev": 0.08, "sampleCount": 2500, "noDataCount": 329 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 3 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 10 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 35 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 95 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 230 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 410 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 530 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 480 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 310 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 68 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.24, "25.0": 0.34, "50.0": 0.42, "75.0": 0.49, "95.0": 0.55 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2023-08-02T00:00:00Z", "to": "2023-08-03T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.40, "max": 0.82, "mean": 0.71, "stDev": 0.11, "sampleCount": 2500, "noDataCount": 154 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 3 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 5 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 10 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 20 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 55 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 160 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 340 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 680 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 700 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 373 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.46, "25.0": 0.62, "50.0": 0.71, "75.0": 0.80, "95.0": 0.89 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.18, "max": 0.54, "mean": 0.38, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 154 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 10 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 30 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 70 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 170 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 320 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 480 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 510 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 390 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 250 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 116 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.17, "25.0": 0.29, "50.0": 0.38, "75.0": 0.46, "95.0": 0.54 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.20, "max": 0.54, "mean": 0.39, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 154 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 5 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 18 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 55 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 150 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 310 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 460 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 510 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 400 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 260 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 178 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.20, "25.0": 0.31, "50.0": 0.39, "75.0": 0.47, "95.0": 0.54 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2023-08-18T00:00:00Z", "to": "2023-08-19T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.38, "max": 0.80, "mean": 0.67, "stDev": 0.11, "sampleCount": 2500, "noDataCount": 310 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 4 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 7 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 14 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 30 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 85 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 230 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 440 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 690 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 560 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 130 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.42, "25.0": 0.57, "50.0": 0.67, "75.0": 0.77, "95.0": 0.86 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.15, "max": 0.50, "mean": 0.35, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 310 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 12 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 35 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 90 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 210 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 370 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 490 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 460 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 310 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 155 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 58 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.15, "25.0": 0.26, "50.0": 0.35, "75.0": 0.43, "95.0": 0.51 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.18, "max": 0.52, "mean": 0.37, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 310 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 8 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 25 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 70 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 180 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 350 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 490 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 470 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 320 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 190 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 87 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.18, "25.0": 0.29, "50.0": 0.37, "75.0": 0.44, "95.0": 0.53 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2023-09-10T00:00:00Z", "to": "2023-09-11T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.30, "max": 0.70, "mean": 0.52, "stDev": 0.12, "sampleCount": 2500, "noDataCount": 405 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 10 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 18 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 38 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 95 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 280 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 510 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 580 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 410 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 120 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 34 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.27, "25.0": 0.41, "50.0": 0.52, "75.0": 0.63, "95.0": 0.74 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.08, "max": 0.42, "mean": 0.26, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 405 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 45 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 110 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 250 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 420 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 480 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 370 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 230 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 110 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 55 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 25 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.09, "25.0": 0.18, "50.0": 0.26, "75.0": 0.33, "95.0": 0.42 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.10, "max": 0.44, "mean": 0.28, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 405 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 30 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 85 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 210 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 400 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 490 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 380 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 240 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 130 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 72 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 58 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.11, "25.0": 0.20, "50.0": 0.28, "75.0": 0.35, "95.0": 0.44 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2024-04-18T00:00:00Z", "to": "2024-04-19T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.25, "max": 0.60, "mean": 0.42, "stDev": 0.11, "sampleCount": 2500, "noDataCount": 380 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 15 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 28 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 55 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 150 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 410 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 580 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 470 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 260 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 85 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 67 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.20, "25.0": 0.33, "50.0": 0.42, "75.0": 0.52, "95.0": 0.65 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.04, "max": 0.36, "mean": 0.20, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 380 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 80 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 170 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 350 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 510 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 440 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 290 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 140 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 65 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 48 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 27 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.06, "25.0": 0.13, "50.0": 0.20, "75.0": 0.27, "95.0": 0.36 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.06, "max": 0.38, "mean": 0.22, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 380 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 55 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 140 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 310 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 500 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 460 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 310 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 170 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 80 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 60 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 35 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.08, "25.0": 0.15, "50.0": 0.22, "75.0": 0.29, "95.0": 0.38 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2024-05-08T00:00:00Z", "to": "2024-05-09T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.30, "max": 0.68, "mean": 0.50, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 307 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 9 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 16 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 35 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 85 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 280 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 540 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 620 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 440 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 130 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 38 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.28, "25.0": 0.41, "50.0": 0.50, "75.0": 0.60, "95.0": 0.72 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.08, "max": 0.40, "mean": 0.26, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 307 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 40 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 105 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 260 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 450 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 500 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 380 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 220 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 100 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 45 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 93 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.10, "25.0": 0.18, "50.0": 0.26, "75.0": 0.33, "95.0": 0.42 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.10, "max": 0.42, "mean": 0.27, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 307 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 28 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 80 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 220 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 430 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 510 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 400 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 250 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 120 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 48 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 107 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.11, "25.0": 0.19, "50.0": 0.27, "75.0": 0.34, "95.0": 0.43 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2024-05-28T00:00:00Z", "to": "2024-05-29T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.35, "max": 0.74, "mean": 0.58, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 264 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 6 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 10 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 20 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 55 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 180 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 410 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 620 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 580 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 280 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 75 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.34, "25.0": 0.49, "50.0": 0.58, "75.0": 0.68, "95.0": 0.80 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.12, "max": 0.46, "mean": 0.31, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 264 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 20 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 55 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 160 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 340 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 480 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 490 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 350 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 195 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 85 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 61 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.13, "25.0": 0.23, "50.0": 0.31, "75.0": 0.38, "95.0": 0.47 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.14, "max": 0.48, "mean": 0.32, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 264 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 12 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 40 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 130 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 310 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 480 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 500 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 380 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 230 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 105 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 49 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.14, "25.0": 0.24, "50.0": 0.32, "75.0": 0.40, "95.0": 0.48 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2024-06-15T00:00:00Z", "to": "2024-06-16T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.42, "max": 0.84, "mean": 0.71, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 164 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 3 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 5 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 9 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 20 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 55 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 150 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 340 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 700 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 690 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 364 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.47, "25.0": 0.63, "50.0": 0.71, "75.0": 0.80, "95.0": 0.90 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.20, "max": 0.54, "mean": 0.39, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 164 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 8 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 22 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 58 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 155 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 310 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 460 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 520 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 410 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 255 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 138 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.20, "25.0": 0.31, "50.0": 0.39, "75.0": 0.46, "95.0": 0.55 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.22, "max": 0.56, "mean": 0.40, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 164 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 5 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 15 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 45 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 130 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 280 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 450 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 530 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 430 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 290 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 161 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.22, "25.0": 0.32, "50.0": 0.40, "75.0": 0.47, "95.0": 0.56 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2024-06-22T00:00:00Z", "to": "2024-06-23T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.44, "max": 0.85, "mean": 0.71, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 85 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 2 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 4 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 7 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 16 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 45 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 145 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 330 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 720 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 710 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 436 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.48, "25.0": 0.64, "50.0": 0.71, "75.0": 0.81, "95.0": 0.91 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.21, "max": 0.55, "mean": 0.40, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 85 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 5 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 18 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 50 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 140 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 290 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 440 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 530 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 440 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 280 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 222 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.21, "25.0": 0.32, "50.0": 0.40, "75.0": 0.47, "95.0": 0.56 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.23, "max": 0.55, "mean": 0.40, "stDev": 0.08, "sampleCount": 2500, "noDataCount": 85 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 3 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 12 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 38 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 110 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 260 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 440 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 540 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 450 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 310 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 252 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.23, "25.0": 0.33, "50.0": 0.40, "75.0": 0.48, "95.0": 0.55 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2024-07-06T00:00:00Z", "to": "2024-07-07T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.44, "max": 0.86, "mean": 0.72, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 284 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 2 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 3 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 7 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 15 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 42 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 130 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 300 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 680 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 730 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 307 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.49, "25.0": 0.64, "50.0": 0.72, "75.0": 0.82, "95.0": 0.91 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.24, "max": 0.58, "mean": 0.43, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 284 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 3 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 12 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 35 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 95 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 220 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 380 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 500 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 470 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 330 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 171 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.24, "25.0": 0.35, "50.0": 0.43, "75.0": 0.50, "95.0": 0.57 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.24, "max": 0.56, "mean": 0.41, "stDev": 0.08, "sampleCount": 2500, "noDataCount": 284 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 3 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 10 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 32 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 90 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 220 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 400 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 520 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 470 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 320 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 151 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.24, "25.0": 0.34, "50.0": 0.41, "75.0": 0.49, "95.0": 0.56 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2024-07-18T00:00:00Z", "to": "2024-07-19T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.46, "max": 0.88, "mean": 0.74, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 201 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 1 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 3 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 5 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 12 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 35 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 110 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 260 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 650 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 780 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 443 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.52, "25.0": 0.66, "50.0": 0.74, "75.0": 0.83, "95.0": 0.92 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.25, "max": 0.58, "mean": 0.44, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 201 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 2 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 10 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 28 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 80 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 190 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 340 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 480 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 490 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 370 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 309 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.25, "25.0": 0.36, "50.0": 0.44, "75.0": 0.51, "95.0": 0.58 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.26, "max": 0.58, "mean": 0.43, "stDev": 0.08, "sampleCount": 2500, "noDataCount": 201 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 2 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 8 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 25 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 72 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 180 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 340 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 490 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 500 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 380 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 302 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.26, "25.0": 0.36, "50.0": 0.43, "75.0": 0.50, "95.0": 0.57 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2024-08-06T00:00:00Z", "to": "2024-08-07T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.38, "max": 0.80, "mean": 0.67, "stDev": 0.11, "sampleCount": 2500, "noDataCount": 181 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 4 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 6 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 12 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 28 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 80 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 220 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 430 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 700 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 570 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 269 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.43, "25.0": 0.58, "50.0": 0.67, "75.0": 0.77, "95.0": 0.87 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.18, "max": 0.52, "mean": 0.37, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 181 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 8 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 25 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 65 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 170 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 330 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 480 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 500 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 380 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 230 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 131 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.18, "25.0": 0.29, "50.0": 0.37, "75.0": 0.45, "95.0": 0.53 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.18, "max": 0.50, "mean": 0.36, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 181 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 6 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 20 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 58 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 160 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 320 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 480 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 490 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 370 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 240 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 175 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.18, "25.0": 0.28, "50.0": 0.36, "75.0": 0.44, "95.0": 0.52 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2024-08-27T00:00:00Z", "to": "2024-08-28T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.36, "max": 0.78, "mean": 0.63, "stDev": 0.11, "sampleCount": 2500, "noDataCount": 239 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 5 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 8 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 16 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 38 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 110 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 290 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 510 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 650 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 440 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 194 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.38, "25.0": 0.53, "50.0": 0.63, "75.0": 0.74, "95.0": 0.85 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.14, "max": 0.50, "mean": 0.34, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 239 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 12 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 38 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 95 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 220 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 380 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 480 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 430 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 290 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 170 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 146 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.14, "25.0": 0.25, "50.0": 0.34, "75.0": 0.42, "95.0": 0.51 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.16, "max": 0.50, "mean": 0.35, "stDev": 0.09, "sampleCount": 2500, "noDataCount": 239 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 8 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 28 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 80 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 195 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 370 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 480 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 440 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 310 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 195 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 155 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.16, "25.0": 0.27, "50.0": 0.35, "75.0": 0.43, "95.0": 0.51 }
+          } }
+        }
+      }
+    },
+    {
+      "interval": { "from": "2024-09-12T00:00:00Z", "to": "2024-09-13T00:00:00Z" },
+      "outputs": {
+        "ndvi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.28, "max": 0.68, "mean": 0.50, "stDev": 0.12, "sampleCount": 2500, "noDataCount": 420 },
+              "histogram": { "bins": [
+                  { "lowEdge": -0.2, "highEdge": -0.08, "count": 12 },
+                  { "lowEdge": -0.08, "highEdge": 0.04, "count": 20 },
+                  { "lowEdge": 0.04, "highEdge": 0.16, "count": 42 },
+                  { "lowEdge": 0.16, "highEdge": 0.28, "count": 105 },
+                  { "lowEdge": 0.28, "highEdge": 0.40, "count": 310 },
+                  { "lowEdge": 0.40, "highEdge": 0.52, "count": 520 },
+                  { "lowEdge": 0.52, "highEdge": 0.64, "count": 560 },
+                  { "lowEdge": 0.64, "highEdge": 0.76, "count": 370 },
+                  { "lowEdge": 0.76, "highEdge": 0.88, "count": 105 },
+                  { "lowEdge": 0.88, "highEdge": 1.0, "count": 36 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.25, "25.0": 0.39, "50.0": 0.50, "75.0": 0.61, "95.0": 0.73 }
+          } }
+        },
+        "ndmi": {
+          "bands": { "B0": {
+              "stats": { "min": 0.06, "max": 0.40, "mean": 0.24, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 420 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 55 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 130 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 280 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 440 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 460 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 340 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 200 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 95 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 50 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 30 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.08, "25.0": 0.16, "50.0": 0.24, "75.0": 0.31, "95.0": 0.40 }
+          } }
+        },
+        "ndre": {
+          "bands": { "B0": {
+              "stats": { "min": 0.08, "max": 0.42, "mean": 0.26, "stDev": 0.10, "sampleCount": 2500, "noDataCount": 420 },
+              "histogram": { "bins": [
+                  { "lowEdge": 0.0, "highEdge": 0.06, "count": 35 },
+                  { "lowEdge": 0.06, "highEdge": 0.12, "count": 95 },
+                  { "lowEdge": 0.12, "highEdge": 0.18, "count": 240 },
+                  { "lowEdge": 0.18, "highEdge": 0.24, "count": 420 },
+                  { "lowEdge": 0.24, "highEdge": 0.30, "count": 470 },
+                  { "lowEdge": 0.30, "highEdge": 0.36, "count": 350 },
+                  { "lowEdge": 0.36, "highEdge": 0.42, "count": 210 },
+                  { "lowEdge": 0.42, "highEdge": 0.48, "count": 110 },
+                  { "lowEdge": 0.48, "highEdge": 0.54, "count": 65 },
+                  { "lowEdge": 0.54, "highEdge": 0.60, "count": 85 }
+                ], "overflowCount": 0, "underflowCount": 0 },
+              "percentiles": { "5.0": 0.10, "25.0": 0.18, "50.0": 0.26, "75.0": 0.33, "95.0": 0.42 }
+          } }
+        }
+      }
+    }
+  ]
+}

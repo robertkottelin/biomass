@@ -68,14 +68,16 @@ export function calculateInheritanceTax(fairMarketValue, taxClass) {
  * - Hold: no harvesting, value grows with biomass
  * - Sell + Invest: sell now, invest proceeds at market rate
  */
-export function projectManagementScenarios(forestType, forestAge, areaHectares, years = 30) {
+export function projectManagementScenarios(forestType, forestAge, areaHectares, years = 30, options = {}) {
   const type = (forestType && forestParams[forestType]) ? forestType : 'pine';
   const params = forestParams[type];
   const discountRate = FORESTRY_DISCOUNT_RATE;
   const marketReturn = 0.05; // 5% long-term equity return
 
-  // Current value
-  const currentBiomass = estimateBiomass(params.ndviSaturation, type, 0, forestAge);
+  // Current value — use observed biomass when available, theoretical as fallback
+  const theoreticalBiomass = estimateBiomass(params.ndviSaturation, type, 0, forestAge);
+  const currentBiomass = options.currentBiomass || theoreticalBiomass;
+  const biomassScale = theoreticalBiomass > 0 ? currentBiomass / theoreticalBiomass : 1;
   const currentTimber = estimateTimberValue(currentBiomass, type, forestAge, areaHectares);
 
   const active = [];
@@ -90,8 +92,8 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
   for (let y = 0; y <= years; y++) {
     const age = forestAge + y;
 
-    // Hold scenario: forest grows, no harvest
-    const holdBiomass = estimateBiomass(params.ndviSaturation, type, y, forestAge);
+    // Hold scenario: forest grows, no harvest (scaled to observed biomass)
+    const holdBiomass = estimateBiomass(params.ndviSaturation, type, y, forestAge) * biomassScale;
     const holdTimber = estimateTimberValue(holdBiomass, type, age, areaHectares);
     hold.push({ year: y, age, value: holdTimber.totalValue });
 

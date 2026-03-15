@@ -113,6 +113,54 @@ describe('estimateBiomass', () => {
       expect(isFinite(result)).toBe(true);
     });
   });
+
+  describe('multi-index estimation (NDMI + NDRE)', () => {
+    it('NDRE increases biomass estimate at high NDVI (breaks saturation)', () => {
+      const ndviOnly = estimateBiomass(0.82, 'pine', 0, 50);
+      const withNdre = estimateBiomass(0.82, 'pine', 0, 50, { ndre: 0.45 });
+      // NDRE provides additional signal beyond saturated NDVI
+      expect(withNdre).toBeGreaterThan(ndviOnly);
+    });
+
+    it('positive NDMI boosts biomass (healthy canopy)', () => {
+      const noNdmi = estimateBiomass(0.7, 'pine', 0, 40);
+      const healthyNdmi = estimateBiomass(0.7, 'pine', 0, 40, { ndmi: 0.4 });
+      expect(healthyNdmi).toBeGreaterThan(noNdmi);
+    });
+
+    it('negative NDMI reduces biomass (stressed canopy)', () => {
+      const noNdmi = estimateBiomass(0.7, 'pine', 0, 40);
+      const stressedNdmi = estimateBiomass(0.7, 'pine', 0, 40, { ndmi: -0.1 });
+      expect(stressedNdmi).toBeLessThan(noNdmi);
+    });
+
+    it('NDMI adjustment stays within ±15% bounds', () => {
+      const base = estimateBiomass(0.7, 'pine', 0, 40);
+      const veryDry = estimateBiomass(0.7, 'pine', 0, 40, { ndmi: -0.5 });
+      const veryWet = estimateBiomass(0.7, 'pine', 0, 40, { ndmi: 0.8 });
+      // healthModifier clamped to [0.85, 1.1]
+      expect(veryDry / base).toBeGreaterThanOrEqual(0.84);
+      expect(veryWet / base).toBeLessThanOrEqual(1.11);
+    });
+
+    it('combined NDRE + NDMI gives highest estimate for thriving forest', () => {
+      const ndviOnly = estimateBiomass(0.8, 'pine', 0, 50);
+      const full = estimateBiomass(0.8, 'pine', 0, 50, { ndre: 0.4, ndmi: 0.35 });
+      expect(full).toBeGreaterThan(ndviOnly);
+    });
+
+    it('no options = backward compatible (same as NDVI-only)', () => {
+      const a = estimateBiomass(0.7, 'pine', 0, 30);
+      const b = estimateBiomass(0.7, 'pine', 0, 30, {});
+      expect(a).toBe(b);
+    });
+
+    it('null ndmi/ndre values are ignored', () => {
+      const a = estimateBiomass(0.7, 'fir', 0, 30);
+      const b = estimateBiomass(0.7, 'fir', 0, 30, { ndmi: null, ndre: null });
+      expect(a).toBe(b);
+    });
+  });
 });
 
 describe('calculateRollingAverage', () => {

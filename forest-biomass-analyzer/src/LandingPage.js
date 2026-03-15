@@ -26,7 +26,7 @@ const faqData = [
   },
   {
     q: 'What satellite data do you use?',
-    a: 'We use ESA Sentinel-2 multispectral imagery, which provides 10m resolution data with a 5-day revisit time. Our analysis spans up to 10 years of historical data, enabling robust trend analysis and seasonal pattern detection.',
+    a: 'We use ESA Sentinel-2 multispectral imagery at native 10m resolution with a 5-day revisit time. Pro and Business plans include high-resolution satellite imagery overlays (true color, NDVI, false color, moisture), server-computed vegetation statistics with percentile distributions, and up to 10 years of historical data for trend analysis.',
   },
   {
     q: 'Can I cancel my subscription at any time?',
@@ -72,6 +72,21 @@ const features = [
     icon: '\uD83D\uDCC5',
     title: 'Succession Planning',
     desc: 'Model inheritance scenarios, compare management strategies, and plan long-term forest asset transfers.',
+  },
+  {
+    icon: '\uD83D\uDCCA',
+    title: 'Vegetation Statistics Dashboard',
+    desc: 'Server-computed NDVI, NDMI, and NDRE statistics with percentile distributions, variability trends, and vegetation density classification.',
+  },
+  {
+    icon: '\uD83D\uDEF0\uFE0F',
+    title: 'Satellite Imagery Overlays',
+    desc: 'View high-resolution true color, NDVI, false color, and moisture imagery directly on the map with adjustable opacity.',
+  },
+  {
+    icon: '\uD83D\uDCE5',
+    title: 'GeoJSON & Data Export',
+    desc: 'Export forest polygons as GeoJSON with analysis metadata, download raw statistics, or export CSV and PDF reports.',
   },
 ];
 
@@ -373,6 +388,7 @@ export default function LandingPage() {
               <ul style={s.pricingFeatures}>
                 <li style={s.pricingFeature}>{'\u2713'} Demo with sample Finnish pine forest</li>
                 <li style={s.pricingFeature}>{'\u2713'} All analysis modules visible</li>
+                <li style={s.pricingFeature}>{'\u2713'} Demo vegetation statistics</li>
                 <li style={s.pricingFeature}>{'\u2713'} No account required</li>
               </ul>
               <button
@@ -394,8 +410,11 @@ export default function LandingPage() {
               </div>
               <ul style={s.pricingFeatures}>
                 <li style={{ ...s.pricingFeature, color: 'rgba(255,255,255,0.95)' }}>{'\u2713'} Real Sentinel-2 satellite data</li>
-                <li style={{ ...s.pricingFeature, color: 'rgba(255,255,255,0.95)' }}>{'\u2713'} All analysis modules</li>
+                <li style={{ ...s.pricingFeature, color: 'rgba(255,255,255,0.95)' }}>{'\u2713'} 10m native resolution imagery</li>
+                <li style={{ ...s.pricingFeature, color: 'rgba(255,255,255,0.95)' }}>{'\u2713'} Vegetation statistics dashboard</li>
+                <li style={{ ...s.pricingFeature, color: 'rgba(255,255,255,0.95)' }}>{'\u2713'} Satellite imagery map overlays</li>
                 <li style={{ ...s.pricingFeature, color: 'rgba(255,255,255,0.95)' }}>{'\u2713'} Save up to 10 forests</li>
+                <li style={{ ...s.pricingFeature, color: 'rgba(255,255,255,0.95)' }}>{'\u2713'} GeoJSON & statistics export</li>
                 <li style={{ ...s.pricingFeature, color: 'rgba(255,255,255,0.95)' }}>{'\u2713'} 100 Sentinel requests/day</li>
               </ul>
               <button
@@ -419,6 +438,7 @@ export default function LandingPage() {
                 <li style={s.pricingFeature}>{'\u2713'} Everything in Pro</li>
                 <li style={s.pricingFeature}>{'\u2713'} Unlimited forests</li>
                 <li style={s.pricingFeature}>{'\u2713'} PDF report export</li>
+                <li style={s.pricingFeature}>{'\u2713'} Full statistics & GeoJSON export</li>
                 <li style={s.pricingFeature}>{'\u2713'} 500 Sentinel requests/day</li>
               </ul>
               <button

@@ -111,4 +111,38 @@ describe('estimateBiodiversity', () => {
     expect(result).not.toBeNull();
     expect(result.overallScore).toBeGreaterThanOrEqual(0);
   });
+
+  test('vegetation stats improve ndviVarianceScore accuracy', () => {
+    const vegStats = {
+      data: [{
+        outputs: {
+          ndvi: {
+            bands: {
+              B0: {
+                stats: { stDev: 0.05 }
+              }
+            }
+          }
+        }
+      }]
+    };
+    const withStats = estimateBiodiversity(
+      makeBiomassData({ ndviMin: 0.5, ndviMax: 0.9 }),
+      makeTreeEstimate(), makeHealthEstimate(), 'pine', 40, 10, vegStats
+    );
+    const withoutStats = estimateBiodiversity(
+      makeBiomassData({ ndviMin: 0.5, ndviMax: 0.9 }),
+      makeTreeEstimate(), makeHealthEstimate(), 'pine', 40, 10
+    );
+    // Both should produce valid scores but may differ
+    expect(withStats).not.toBeNull();
+    expect(withoutStats).not.toBeNull();
+    expect(withStats.structuralDiversity).not.toBe(withoutStats.structuralDiversity);
+  });
+
+  test('7th arg is optional - existing calls still work', () => {
+    const result = estimateBiodiversity(makeBiomassData(), makeTreeEstimate(), makeHealthEstimate(), 'pine', 40, 10);
+    expect(result).not.toBeNull();
+    expect(result.overallScore).toBeGreaterThanOrEqual(0);
+  });
 });

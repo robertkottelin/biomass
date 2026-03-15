@@ -19,6 +19,7 @@ import {
   calculateGroupViability,
   VOLUNTARY_CREDIT_PRICE
 } from './carbonCertification';
+import { assessSiteQuality } from './siteQuality';
 
 const InfoButton = ({ id, showInfo, setShowInfo, children }) => (
   <span style={{ position: 'relative', display: 'inline-block' }}>
@@ -49,23 +50,28 @@ const InfoButton = ({ id, showInfo, setShowInfo, children }) => (
   </span>
 );
 
-const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, showInfo, setShowInfo }) => {
+const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, showInfo, setShowInfo, healthEstimate, vegetationStats }) => {
   const timberValue = useMemo(() => {
     if (!biomassData || biomassData.length === 0) return null;
     const latestBiomass = biomassData[biomassData.length - 1].biomass;
     return estimateTimberValue(latestBiomass, forestType, forestAge, areaHectares);
   }, [biomassData, forestType, forestAge, areaHectares]);
 
+  const siteQuality = useMemo(() => {
+    if (!biomassData || biomassData.length === 0) return null;
+    return assessSiteQuality(biomassData, healthEstimate, vegetationStats, forestType, forestAge);
+  }, [biomassData, healthEstimate, vegetationStats, forestType, forestAge]);
+
   const forestValueData = useMemo(() => {
     if (!biomassData || biomassData.length === 0) return null;
     const latestBiomass = biomassData[biomassData.length - 1].biomassRollingAvg
       ?? biomassData[biomassData.length - 1].biomass;
-    const values = projectForestValue(forestType, areaHectares, 100);
+    const values = projectForestValue(forestType, areaHectares, 100, { currentAge: forestAge, siteQuality });
     const optimal = findOptimalHarvest(forestType, areaHectares);
-    const cycle = projectHarvestCycle(forestType, areaHectares, 100);
-    const harvestRec = findOptimalHarvestYear(forestType, forestAge, latestBiomass, areaHectares);
+    const cycle = projectHarvestCycle(forestType, areaHectares, 100, { currentBiomass: latestBiomass, currentAge: forestAge });
+    const harvestRec = findOptimalHarvestYear(forestType, forestAge, latestBiomass, areaHectares, { siteQuality });
     return { values, optimal, cycle, harvestRec };
-  }, [biomassData, forestType, forestAge, areaHectares]);
+  }, [biomassData, forestType, forestAge, areaHectares, siteQuality]);
 
   const valueChartData = useMemo(() => {
     if (!forestValueData) return [];
@@ -167,7 +173,7 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '20px' }}>
         <div style={cardStyle}>
           <div style={{ ...cardLabelStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>Timber Value <InfoButton id="timberValue" showInfo={showInfo} setShowInfo={setShowInfo}>
-            Biomass (tons/ha) is converted to volume using species wood density (pine 0.42, fir 0.38, birch 0.49, aspen 0.35 t/m³). Volume is split into sawlog and pulpwood by forest age: ≤30yr = 10% sawlog, ≥60yr = 70% sawlog, linear between. Prices are Finnish averages (Luke 2024): pine sawlog €72/m³, pulpwood €32/m³. Total = (sawlog vol × sawlog price + pulpwood vol × pulpwood price) × area.
+            Biomass (tons/ha) is converted to volume using species wood density (pine 0.42, spruce 0.38, birch 0.49, aspen 0.35 t/m³). Volume is split into sawlog and pulpwood by forest age: ≤30yr = 10% sawlog, ≥60yr = 70% sawlog, linear between. Prices are Finnish averages (Luke 2024): pine sawlog €72/m³, pulpwood €32/m³. Total = (sawlog vol × sawlog price + pulpwood vol × pulpwood price) × area.
           </InfoButton></div>
           <div style={cardValueStyle}>
             {timberValue ? `€${timberValue.totalValue.toFixed(0)}` : '—'}
@@ -187,13 +193,36 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
         </div>
         <div style={cardStyle}>
           <div style={{ ...cardLabelStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>Optimal Harvest <InfoButton id="optimalHarvest" showInfo={showInfo} setShowInfo={setShowInfo}>
-            Uses two-generation NPV optimization: finds the first-harvest age that maximizes the discounted sum of (1) current stand timber value minus regeneration cost, plus (2) a second Faustmann-optimal rotation. Projections are anchored to satellite-derived biomass. Rotation age ({forestValueData ? forestValueData.harvestRec.rotationAge : '—'}yr) is the Faustmann-optimal cycle for replanting from bare land.
+            Uses two-generation NPV optimization: finds the first-harvest age that maximizes the discounted sum of (1) current stand timber value minus regeneration cost, plus (2) a second Faustmann-optimal rotation. Projections are anchored to satellite-derived biomass.
+            <br /><br />
+            <strong>Site-quality adjustment:</strong> When health, vegetation statistics, and NDVI trend data are available, the recommendation adapts to actual forest conditions via the Site Quality Index (SQI). SQI compares observed peak NDVI against the expected growth curve for the species and age — values above 1.0 mean the site is outperforming expectations. For thriving forests (SQI &gt; 1.05, positive NDVI trend, no health issues), the effective discount rate is reduced (up to 30%) and a compound growth bonus is applied to future timber projections, pushing the optimal harvest later. For stressed forests (low health score, bark beetle/root rot, declining NDVI, or moisture stress), a harvest urgency factor shifts the search window earlier — the worse the condition, the stronger the pull toward earlier harvest. The minimum legal harvest age is always respected as a floor.{siteQuality ? ` Current SQI: ${siteQuality.siteQualityIndex.toFixed(2)}×.` : ''}
           </InfoButton></div>
           <div style={cardValueStyle}>
             {forestValueData ? (forestValueData.harvestRec.yearsFromNow === 0 ? 'Now' : `In ${forestValueData.harvestRec.yearsFromNow} yr`) : '—'}
           </div>
           <div style={cardSubStyle}>Age {forestValueData ? forestValueData.harvestRec.harvestYear : '—'} · €{forestValueData ? forestValueData.harvestRec.valueAtHarvest.toFixed(0) : '0'}</div>
-          <div style={cardSubStyle}>Growth: {forestValueData ? (forestValueData.harvestRec.annualGrowthRate * 100).toFixed(1) : '0'}%/yr · Rotation: {forestValueData ? forestValueData.harvestRec.rotationAge : '—'}yr</div>
+          <div style={cardSubStyle}>Growth: {forestValueData ? (forestValueData.harvestRec.annualGrowthRate * 100).toFixed(1) : '0'}%/yr</div>
+          {siteQuality && (
+            <div style={{ marginTop: '6px' }}>
+              <span style={{
+                display: 'inline-block',
+                fontSize: '10px',
+                fontWeight: 'bold',
+                padding: '2px 8px',
+                borderRadius: '10px',
+                color: '#fff',
+                backgroundColor: siteQuality.siteQualityIndex > 1.05 ? '#27ae60'
+                  : siteQuality.siteQualityIndex < 0.95 ? '#e74c3c' : '#95a5a6'
+              }}>
+                SQI {siteQuality.siteQualityIndex.toFixed(2)}×
+              </span>
+              {forestValueData?.harvestRec?.adjustmentReason && (
+                <div style={{ fontSize: '10px', color: '#888', marginTop: '3px' }}>
+                  {forestValueData.harvestRec.adjustmentReason}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -243,7 +272,7 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '20px', marginTop: '20px' }}>
           <div style={cardStyle}>
             <div style={{ ...cardLabelStyle, color: '#27ae60', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>Carbon Stock <InfoButton id="carbonStock" showInfo={showInfo} setShowInfo={setShowInfo}>
-              Total CO2 equivalent stored per hectare, calculated using IPCC Tier 1 methodology. Above-ground = biomass × 0.5 (carbon fraction) × 3.67 (CO2/C ratio). Below-ground = above-ground × root:shoot ratio (pine/fir 0.29, birch/aspen 0.24). Soil carbon from Finnish averages (Luke): pine 70, fir 85, birch 55, aspen 50 t C/ha.
+              Total CO2 equivalent stored per hectare, calculated using IPCC Tier 1 methodology. Above-ground = biomass × 0.5 (carbon fraction) × 3.67 (CO2/C ratio). Below-ground = above-ground × root:shoot ratio (pine/spruce 0.29, birch/aspen 0.24). Soil carbon from Finnish averages (Luke): pine 70, spruce 85, birch 55, aspen 50 t C/ha.
             </InfoButton></div>
             <div style={{ ...cardValueStyle, color: '#27ae60' }}>
               {carbonStock.co2eTons.toFixed(1)} t CO2e/ha

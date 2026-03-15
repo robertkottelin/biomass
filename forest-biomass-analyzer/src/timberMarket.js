@@ -96,18 +96,20 @@ export function calculatePriceRange(biomassPerHa, forestType, forestAge, areaHec
 /**
  * Analyze harvest delay: project value at +1/3/5yr with discount rate.
  */
-export function analyzeHarvestDelay(forestType, currentAge, areaHectares, delayYears = [1, 3, 5]) {
+export function analyzeHarvestDelay(forestType, currentAge, areaHectares, delayYears = [1, 3, 5], options = {}) {
   const type = (forestType && forestParams[forestType]) ? forestType : 'pine';
   const params = forestParams[type];
   const discountRate = FORESTRY_DISCOUNT_RATE;
 
-  // Current value
-  const currentBiomass = estimateBiomass(params.ndviSaturation, type, 0, currentAge);
+  // Current value — use observed biomass when available
+  const theoreticalBiomass = estimateBiomass(params.ndviSaturation, type, 0, currentAge);
+  const currentBiomass = options.currentBiomass || theoreticalBiomass;
+  const biomassScale = theoreticalBiomass > 0 ? currentBiomass / theoreticalBiomass : 1;
   const currentRange = calculatePriceRange(currentBiomass, type, currentAge, areaHectares);
 
   const projections = delayYears.map(years => {
     const futureAge = currentAge + years;
-    const futureBiomass = estimateBiomass(params.ndviSaturation, type, years, currentAge);
+    const futureBiomass = estimateBiomass(params.ndviSaturation, type, years, currentAge) * biomassScale;
     const futureRange = calculatePriceRange(futureBiomass, type, futureAge, areaHectares);
     const discountFactor = Math.pow(1 + discountRate, years);
 

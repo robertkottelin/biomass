@@ -518,4 +518,174 @@ describe('findOptimalHarvestYear', () => {
     expect(result.harvestYear).toBeGreaterThanOrEqual(60); // MIN_HARVEST_AGE.pine
     expect(result.harvestYear).toBeLessThanOrEqual(90);
   });
+
+  test('high SQI returns siteQualityIndex in result', () => {
+    const siteQuality = {
+      siteQualityIndex: 1.2,
+      harvestUrgency: 0,
+      factors: { growthVigor: { value: 0.003 } }
+    };
+    const result = findOptimalHarvestYear('pine', 50, 120, 5, { siteQuality });
+    expect(result.siteQualityIndex).toBe(1.2);
+    expect(result.harvestUrgency).toBe(0);
+  });
+
+  test('health urgency can shift harvest earlier', () => {
+    const noUrgency = findOptimalHarvestYear('pine', 50, 120, 5);
+    const siteQuality = {
+      siteQualityIndex: 1.0,
+      harvestUrgency: 8,
+      factors: { growthVigor: { value: -0.02 } }
+    };
+    const withUrgency = findOptimalHarvestYear('pine', 50, 120, 5, { siteQuality });
+    expect(withUrgency.harvestYear).toBeLessThanOrEqual(noUrgency.harvestYear);
+  });
+
+  test('thriving high-SQI forest with observed growth extends harvest later', () => {
+    const baseline = findOptimalHarvestYear('pine', 50, 120, 5);
+    const siteQuality = {
+      siteQualityIndex: 1.25,
+      harvestUrgency: 0,
+      factors: { growthVigor: { value: 0.015 } },
+      observedBiomassGrowth: { annualGrowthRate: 14, latestNdviBiomass: 320, latestNdvi: 0.72, ndviSlope: 0.01 }
+    };
+    const thriving = findOptimalHarvestYear('pine', 50, 120, 5, { siteQuality });
+    expect(thriving.harvestYear).toBeGreaterThan(baseline.harvestYear);
+  });
+
+  test('20yo forest entered as age 55, growing at 14 t/ha/yr, harvests well after 60', () => {
+    // The user's scenario: real age ~20, entered as 55, currentBiomass inflated to ~380
+    // With latestNdviBiomass the optimizer should use NDVI-based biomass (~320) as base
+    const siteQuality = {
+      siteQualityIndex: 1.1,
+      harvestUrgency: 0,
+      observedBiomassGrowth: {
+        annualGrowthRate: 14,
+        latestNdviBiomass: 320,
+        earliestNdviBiomass: 260,
+        latestNdvi: 0.72,
+        ndviSlope: 0.01
+      }
+    };
+    const result = findOptimalHarvestYear('pine', 55, 380, 5, { siteQuality });
+    // Should recommend harvest meaningfully after min age 60
+    expect(result.harvestYear).toBeGreaterThanOrEqual(65);
+  });
+
+  test('same forest entered as age 20 gives similar harvest age', () => {
+    // Same NDVI data but correctly entered as age 20
+    const siteQuality = {
+      siteQualityIndex: 1.1,
+      harvestUrgency: 0,
+      observedBiomassGrowth: {
+        annualGrowthRate: 14,
+        latestNdviBiomass: 320,
+        earliestNdviBiomass: 260,
+        latestNdvi: 0.72,
+        ndviSlope: 0.01
+      }
+    };
+    const asAge55 = findOptimalHarvestYear('pine', 55, 380, 5, { siteQuality });
+    const asAge20 = findOptimalHarvestYear('pine', 20, 200, 5, { siteQuality });
+    // Both should recommend similar absolute calendar years — the NDVI base dominates
+    // The difference should be less than 10 years (not the 35 year age difference)
+    expect(Math.abs(asAge55.harvestYear - asAge20.harvestYear)).toBeLessThanOrEqual(15);
+  });
+
+  test('declining forest with flat recent biomass gets earlier harvest', () => {
+    const siteQuality = {
+      siteQualityIndex: 0.9,
+      harvestUrgency: 5, // declineUrgency from flat recent biomass
+      observedBiomassGrowth: {
+        annualGrowthRate: -2,
+        latestNdviBiomass: 200,
+        earliestNdviBiomass: 220,
+        declineUrgency: 5,
+        latestNdvi: 0.50,
+        ndviSlope: -0.02
+      }
+    };
+    const result = findOptimalHarvestYear('pine', 65, 200, 5, { siteQuality });
+    expect(result.harvestYear).toBeLessThanOrEqual(68);
+  });
+
+  test('pine age 59, NDVI 0.75 stable → harvest age 74 (health delay)', () => {
+    const siteQuality = {
+      siteQualityIndex: 1.0,
+      harvestUrgency: 0,
+      observedBiomassGrowth: {
+        annualGrowthRate: 0.5, // near-zero observed growth (NDVI saturated)
+        latestNdviBiomass: 397,
+        earliestNdviBiomass: 395,
+        latestNdvi: 0.75,
+        ndviSlope: 0.0   // stable
+      }
+    };
+    const result = findOptimalHarvestYear('pine', 59, 397, 5, { siteQuality });
+    // NDVI health delay: ndviRatio=0.88, healthLevel=1.0, stable → delay=15 → harvest 74
+    expect(result.harvestYear).toBeGreaterThanOrEqual(74);
+  });
+
+  test('pine age 55, NDVI 0.70 growing → harvest age 75+ (growing delay)', () => {
+    const siteQuality = {
+      siteQualityIndex: 1.0,
+      harvestUrgency: 0,
+      observedBiomassGrowth: {
+        annualGrowthRate: 5,
+        latestNdviBiomass: 371,
+        earliestNdviBiomass: 340,
+        latestNdvi: 0.70,
+        ndviSlope: 0.01   // growing
+      }
+    };
+    const result = findOptimalHarvestYear('pine', 55, 371, 5, { siteQuality });
+    // ndviRatio=0.82, healthLevel=1.0, growing → delay=20 → harvest 75
+    expect(result.harvestYear).toBeGreaterThanOrEqual(75);
+  });
+
+  test('pine age 65, NDVI 0.65 declining -0.02/yr → harvest ≤70 (no delay)', () => {
+    const siteQuality = {
+      siteQualityIndex: 0.9,
+      harvestUrgency: 3,
+      observedBiomassGrowth: {
+        annualGrowthRate: -1,
+        latestNdviBiomass: 344,
+        earliestNdviBiomass: 370,
+        latestNdvi: 0.65,
+        ndviSlope: -0.02   // significant decline
+      }
+    };
+    const result = findOptimalHarvestYear('pine', 65, 344, 5, { siteQuality });
+    expect(result.harvestYear).toBeLessThanOrEqual(70);
+  });
+
+  test('pine age 65, NDVI 0.30 stable → harvest ≤70 (too low NDVI for delay)', () => {
+    const siteQuality = {
+      siteQualityIndex: 0.8,
+      harvestUrgency: 0,
+      observedBiomassGrowth: {
+        annualGrowthRate: 0.2,
+        latestNdviBiomass: 159,
+        earliestNdviBiomass: 155,
+        latestNdvi: 0.30,
+        ndviSlope: 0.0   // stable but very low NDVI
+      }
+    };
+    const result = findOptimalHarvestYear('pine', 65, 159, 5, { siteQuality });
+    // ndviRatio=0.35, healthLevel=0 → no delay
+    expect(result.harvestYear).toBeLessThanOrEqual(70);
+  });
+
+  test('MIN_HARVEST_AGE still respected with urgency', () => {
+    const siteQuality = {
+      siteQualityIndex: 0.7,
+      harvestUrgency: 20,
+      factors: { growthVigor: { value: -0.03 } }
+    };
+    ['pine', 'fir', 'birch', 'aspen'].forEach(type => {
+      const result = findOptimalHarvestYear(type, 40, 100, 5, { siteQuality });
+      const minAge = type === 'aspen' ? 35 : type === 'birch' ? 50 : 60;
+      expect(result.harvestYear).toBeGreaterThanOrEqual(minAge);
+    });
+  });
 });

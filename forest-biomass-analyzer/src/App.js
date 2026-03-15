@@ -18,6 +18,9 @@ import { useCheckout } from './useCheckout';
 import LandingPage from './LandingPage';
 import Login from './Login';
 import UpgradeBanner from './UpgradeBanner';
+import VegetationStatistics from './VegetationStatistics';
+import SatelliteImagery from './SatelliteImagery';
+import { assessSiteQuality } from './siteQuality';
 import api from './api';
 import 'leaflet/dist/leaflet.css';
 
@@ -197,7 +200,6 @@ const ForestBiomassApp = () => {
   const [processingStatus, setProcessingStatus] = useState('');
   const mapRef = useRef();
   const [showInstructions, setShowInstructions] = useState(false);
-  const [showDocumentation, setShowDocumentation] = useState(false);
   const [treeEstimate, setTreeEstimate] = useState(null);
   const [healthEstimate, setHealthEstimate] = useState(null);
   const [biodiversityEstimate, setBiodiversityEstimate] = useState(null);
@@ -209,6 +211,8 @@ const ForestBiomassApp = () => {
   const [savingForest, setSavingForest] = useState(false);
   const [loadedForestId, setLoadedForestId] = useState(null);
   const abortControllerRef = useRef(null);
+  const [vegetationStats, setVegetationStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(false);
 
   // Fetch saved forests for Pro/Business users
   const fetchSavedForests = useCallback(async () => {
@@ -365,7 +369,7 @@ const ForestBiomassApp = () => {
         const healthResult = analyzeForestHealth(finalResults, type, age);
         setHealthEstimate(healthResult);
 
-        const bioEst = estimateBiodiversity(finalResults, treeEst, healthResult, type, age, area);
+        const bioEst = estimateBiodiversity(finalResults, treeEst, healthResult, type, age, area, vegetationStats);
         setBiodiversityEstimate(bioEst);
       } else {
         setBiomassData([]);
@@ -661,8 +665,12 @@ const ForestBiomassApp = () => {
       setForestType(demo.forest.type);
       setForestAge(demo.forest.age);
 
-      // Process demo biomass data
+      // Process demo biomass data — recalculate biomass with multi-index model
       let results = demo.biomassData;
+      const demoAgeStart = demo.forest.age - 10;
+      for (const r of results) {
+        r.biomass = estimateBiomass(r.ndvi, demo.forest.type, r.yearsFromStart, demoAgeStart, { ndmi: r.ndmi, ndre: r.ndre });
+      }
 
       // Age estimation from NDVI trend (if enabled)
       if (estimateAgeMode) {
@@ -672,7 +680,7 @@ const ForestBiomassApp = () => {
           setForestAge(ageResult.estimatedAge);
           const correctedAgeStart = ageResult.estimatedAge - 10;
           for (const r of results) {
-            r.biomass = estimateBiomass(r.ndvi, demo.forest.type, r.yearsFromStart, correctedAgeStart);
+            r.biomass = estimateBiomass(r.ndvi, demo.forest.type, r.yearsFromStart, correctedAgeStart, { ndmi: r.ndmi, ndre: r.ndre });
             r.forestAge = correctedAgeStart + r.yearsFromStart;
           }
         } else {
@@ -697,7 +705,7 @@ const ForestBiomassApp = () => {
       const healthResult = analyzeForestHealth(finalResults, demo.forest.type, demo.forest.age);
       setHealthEstimate(healthResult);
 
-      const bioEst = estimateBiodiversity(finalResults, treeEst, healthResult, demo.forest.type, demo.forest.age, demo.forest.area_hectares);
+      const bioEst = estimateBiodiversity(finalResults, treeEst, healthResult, demo.forest.type, demo.forest.age, demo.forest.area_hectares, vegetationStats);
       setBiodiversityEstimate(bioEst);
       setProcessingStatus('');
     } catch (err) {
@@ -810,7 +818,7 @@ const ForestBiomassApp = () => {
               const dayOfYear = Math.floor((dateTime - new Date(year, 0, 0)) / 86400000);
               const fractionalYear = yearsFromStart + (dayOfYear / 365);
 
-              const biomass = estimateBiomass(avgNDVI, selectedForest.type, fractionalYear, ageAtAnalysisStart);
+              const biomass = estimateBiomass(avgNDVI, selectedForest.type, fractionalYear, ageAtAnalysisStart, { ndmi: ndviStats.ndmiMean, ndre: ndviStats.ndreMean });
 
               // Keep the latest NDVI pixel values for tree estimation
               latestNdviValues = ndviStats.ndviValues;
@@ -874,7 +882,7 @@ const ForestBiomassApp = () => {
           // Recompute biomass with corrected age
           const correctedAgeStart = ageResult.estimatedAge - 10;
           for (const r of results) {
-            r.biomass = estimateBiomass(r.ndvi, selectedForest.type, r.yearsFromStart, correctedAgeStart);
+            r.biomass = estimateBiomass(r.ndvi, selectedForest.type, r.yearsFromStart, correctedAgeStart, { ndmi: r.ndmi, ndre: r.ndre });
             r.forestAge = correctedAgeStart + r.yearsFromStart;
           }
         } else {
@@ -917,7 +925,8 @@ const ForestBiomassApp = () => {
         healthResult,
         selectedForest.type,
         forestAge,
-        parseFloat(selectedForest.area)
+        parseFloat(selectedForest.area),
+        vegetationStats
       );
       setBiodiversityEstimate(bioEst);
 
@@ -950,6 +959,42 @@ const ForestBiomassApp = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
+    }
+  };
+
+  // Fetch detailed vegetation statistics via Statistical API
+  const fetchVegetationStats = async () => {
+    setStatsLoading(true);
+    setVegetationStats(null);
+    try {
+      if (isDemo) {
+        const data = await api.get('/api/forests/demo/statistics');
+        setVegetationStats(data);
+        return;
+      }
+
+      const forest = selectedForests[selectedForestIndex];
+      if (!forest) return;
+
+      // Convert [lat,lng] to [lng,lat] GeoJSON
+      const coords = forest.coords.map(c => [c[1], c[0]]);
+      const geoJsonCoords = [...coords];
+      if (geoJsonCoords[0][0] !== geoJsonCoords[geoJsonCoords.length - 1][0] ||
+        geoJsonCoords[0][1] !== geoJsonCoords[geoJsonCoords.length - 1][1]) {
+        geoJsonCoords.push(geoJsonCoords[0]);
+      }
+
+      const geometry = { type: 'Polygon', coordinates: [geoJsonCoords] };
+      const currentYear = new Date().getFullYear();
+      const dateFrom = `${currentYear - 2}-01-01`;
+      const dateTo = new Date().toISOString().split('T')[0];
+
+      const data = await api.post('/api/sentinel/statistics', { geometry, dateFrom, dateTo });
+      setVegetationStats(data);
+    } catch (err) {
+      setError(`Statistics error: ${err.message}`);
+    } finally {
+      setStatsLoading(false);
     }
   };
 
@@ -986,6 +1031,7 @@ const ForestBiomassApp = () => {
     setSelectedForests([]);
     setSelectedForestIndex(0);
     setBiomassData([]);
+    setVegetationStats(null);
   }, []);
 
   const handleForestTypeChange = (newType) => {
@@ -1114,6 +1160,59 @@ const ForestBiomassApp = () => {
       setExportingPdf(false);
       setPdfProgress('');
     }
+  };
+
+  const exportToGeoJSON = () => {
+    if (selectedForests.length === 0 || selectedForestIndex >= selectedForests.length) return;
+    const forest = selectedForests[selectedForestIndex];
+    const coords = forest.coords.map(c => [c[1], c[0]]);
+    const geoJsonCoords = [...coords];
+    if (geoJsonCoords.length > 0 && (geoJsonCoords[0][0] !== geoJsonCoords[geoJsonCoords.length - 1][0] || geoJsonCoords[0][1] !== geoJsonCoords[geoJsonCoords.length - 1][1])) {
+      geoJsonCoords.push(geoJsonCoords[0]);
+    }
+    const latest = biomassData.length > 0 ? biomassData[biomassData.length - 1] : null;
+    const geojson = {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [geoJsonCoords] },
+        properties: {
+          name: forest.name || `Forest #${selectedForestIndex + 1}`,
+          type: forest.type || forestType,
+          area_hectares: parseFloat(forest.area),
+          age: forestAge,
+          ...(latest ? {
+            latest_ndvi: latest.ndvi,
+            latest_biomass: latest.biomass,
+            latest_date: latest.date,
+            observations: biomassData.length,
+          } : {}),
+          ...(treeEstimate ? { estimated_trees: treeEstimate.count, trees_per_ha: treeEstimate.treesPerHa } : {}),
+          ...(healthEstimate ? { health_score: healthEstimate.healthScore } : {}),
+          exported_at: new Date().toISOString(),
+        },
+      }],
+    };
+    const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/geo+json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `forest_${forestType}_${new Date().toISOString().slice(0, 10)}.geojson`;
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const downloadStatistics = () => {
+    if (!vegetationStats) return;
+    const blob = new Blob([JSON.stringify(vegetationStats, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `vegetation_statistics_${new Date().toISOString().slice(0, 10)}.json`;
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const styles = {
@@ -1399,12 +1498,12 @@ const ForestBiomassApp = () => {
   return (
     <>
       <nav style={styles.dashNav}>
-        <div style={styles.dashNavInner}>
-          <a href="/" style={styles.dashBrand}>{'\uD83C\uDF32'} ForestData</a>
-          <div style={styles.dashNavRight}>
+        <div className="dash-nav-inner" style={styles.dashNavInner}>
+          <a href="/" className="dash-brand" style={styles.dashBrand}>{'\uD83C\uDF32'} ForestData</a>
+          <div className="dash-nav-right" style={styles.dashNavRight}>
             <a href="/" style={styles.dashNavLink}>Home</a>
             {user && <>
-              <span style={{ color: colors.paleGreen, fontSize: '13px' }}>{user.email}</span>
+              <span className="dash-nav-email" style={{ color: colors.paleGreen, fontSize: '13px' }}>{user.email}</span>
               <span style={{
                 fontSize: '11px',
                 fontWeight: 700,
@@ -1464,8 +1563,8 @@ const ForestBiomassApp = () => {
           </div>
         </div>
       </nav>
-      <div style={styles.container}>
-      <h1 style={styles.header}>Forest Analysis Dashboard</h1>
+      <div className="dash-container" style={styles.container}>
+      <h1 className="dash-header" style={styles.header}>Forest Analysis Dashboard</h1>
 
       {checkoutSuccess && (
         <div style={{
@@ -1627,290 +1726,13 @@ const ForestBiomassApp = () => {
         )}
       </div>
 
-      {/* Technical Documentation Panel */}
-      <div style={styles.authSection}>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: showDocumentation ? '15px' : 0
-        }}>
-          <h3 style={{ margin: 0 }}>🔧 Technical Documentation</h3>
-          <button
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '20px',
-              color: colors.lightGreen
-            }}
-            onClick={() => setShowDocumentation(!showDocumentation)}
-          >
-            {showDocumentation ? '▼' : '▶'}
-          </button>
-        </div>
-        
-        {showDocumentation && (
-          <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
-            <h2 style={{ marginTop: '20px', marginBottom: '15px' }}>System Architecture Overview</h2>
-            <p>This application integrates with the <strong>Copernicus Data Space Ecosystem</strong> to analyze Sentinel-2 satellite imagery for forest biomass estimation. It processes 10 years of historical data to track forest growth and health.</p>
-
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>1. Sentinel-2 Satellite & Spectral Bands</h3>
-            
-            <h4>What is Sentinel-2?</h4>
-            <ul style={{ marginLeft: '20px' }}>
-              <li>European Space Agency (ESA) satellite constellation (2 satellites: Sentinel-2A and 2B)</li>
-              <li><strong>Revisit time</strong>: 5 days at equator, 2-3 days at mid-latitudes</li>
-              <li><strong>Spatial resolution</strong>: 10m for key bands (B02, B03, B04, B08)</li>
-              <li><strong>Swath width</strong>: 290 km</li>
-            </ul>
-
-            <h4>Key Spectral Bands Used:</h4>
-            <pre style={styles.codeBlock}>
-{`B04 (Red):  665 nm - 10m resolution — chlorophyll absorption
-B05 (Red Edge): 705 nm - 20m resolution — chlorophyll density
-B08 (NIR):  842 nm - 10m resolution — canopy structure
-B11 (SWIR): 1610 nm - 20m resolution — canopy water content
-SCL (Scene Classification Layer): Cloud/snow/water mask - 20m resolution`}
-            </pre>
-
-            <h4>Why These Bands?</h4>
-            <ul style={{ marginLeft: '20px' }}>
-              <li><strong>Red (B04)</strong>: Absorbed by chlorophyll — forms NDVI with NIR</li>
-              <li><strong>Red Edge (B05)</strong>: Sensitive to chlorophyll density — forms NDRE with NIR</li>
-              <li><strong>NIR (B08)</strong>: Strongly reflected by healthy vegetation's cellular structure</li>
-              <li><strong>SWIR (B11)</strong>: Sensitive to canopy water content — forms NDMI with NIR</li>
-            </ul>
-
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>2. NDVI (Normalized Difference Vegetation Index)</h3>
-            
-            <h4>Formula:</h4>
-            <pre style={styles.codeBlock}>
-{`NDVI = (NIR - Red) / (NIR + Red) = (B08 - B04) / (B08 + B04)`}
-            </pre>
-
-            <h4>Value Interpretation:</h4>
-            <ul style={{ marginLeft: '20px' }}>
-              <li><strong>0.6-0.9</strong>: Dense, healthy forest canopy</li>
-              <li><strong>0.3-0.6</strong>: Moderate vegetation/young forest</li>
-              <li><strong>0.1-0.3</strong>: Sparse vegetation/stressed forest</li>
-              <li><strong>0-0.1</strong>: Bare soil/non-vegetated</li>
-              <li><strong>&lt; 0</strong>: Water bodies</li>
-            </ul>
-
-            <h4>Why NDVI Works:</h4>
-            <ul style={{ marginLeft: '20px' }}>
-              <li>Healthy vegetation absorbs red light for photosynthesis</li>
-              <li>Internal leaf structure reflects NIR strongly</li>
-              <li>The ratio normalizes for illumination differences</li>
-            </ul>
-
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>3. Data Acquisition Pipeline</h3>
-
-            <h4>Authentication:</h4>
-            <p>Sentinel Hub credentials are managed server-side. The backend authenticates with the Copernicus Data Space using OAuth2 client credentials and caches the access token. Users authenticate with ForestData via email/password login (JWT stored in httpOnly cookies).</p>
-
-            <h4>Step 1: Discovery - Catalog API</h4>
-            <pre style={styles.codeBlock}>
-{`// Find available cloud-free acquisitions
-POST https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/search
-{
-  bbox: [west, south, east, north],
-  datetime: "2024-06-01/2024-08-31",  // Summer months only
-  collections: ["sentinel-2-l2a"],     // Level-2A = atmospherically corrected
-  filter: "eo:cloud_cover < 30"       // Max 30% cloud cover
-}`}
-            </pre>
-
-            <h4>Step 2: Processing - Process API</h4>
-            <pre style={styles.codeBlock}>
-{`// Extract NDVI for specific polygon and date
-POST https://sh.dataspace.copernicus.eu/api/v1/process
-{
-  input: {
-    bounds: {
-      bbox: [lon_min, lat_min, lon_max, lat_max],
-      geometry: geoJsonPolygon  // Exact forest boundary for clipping
-    },
-    data: [{
-      type: "sentinel-2-l2a",
-      dataFilter: {
-        timeRange: { from: acquisitionDate, to: nextDay },
-        mosaickingOrder: "leastCC"  // Least cloud coverage first
-      }
-    }]
-  },
-  output: {
-    width: 50-300,   // Adaptive based on polygon size
-    height: 50-300,  // Higher res for smaller areas
-    responses: [{ format: { type: "image/tiff" } }]
-  },
-  evalscript: customScript  // NDVI calculation + cloud masking
-}`}
-            </pre>
-
-            <h4>Adaptive Resolution Logic:</h4>
-            <ul style={{ marginLeft: '20px' }}>
-              <li><strong>&lt; 1 km²</strong>: 50×50 pixels (20m/pixel)</li>
-              <li><strong>1-5 km²</strong>: 100×100 pixels</li>
-              <li><strong>5-20 km²</strong>: 200×200 pixels</li>
-              <li><strong>&gt; 20 km²</strong>: 300×300 pixels</li>
-            </ul>
-
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>4. Cloud Masking with Scene Classification Layer (SCL)</h3>
-
-            <p>The app uses Sentinel-2's SCL band to filter out unreliable pixels:</p>
-
-            <pre style={styles.codeBlock}>
-{`// SCL Values filtered out:
-SCL_CLOUD_MEDIUM = 8    // Medium probability clouds
-SCL_CLOUD_HIGH = 9      // High probability clouds
-SCL_THIN_CIRRUS = 10    // Cirrus clouds
-SCL_SNOW_ICE = 11       // Snow/ice
-
-// Only process:
-SCL_VEGETATION = 4      // Vegetation pixels
-SCL_NOT_VEGETATED = 5   // Bare soil
-SCL_WATER = 6          // Water (for contrast)`}
-            </pre>
-
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>5. Biomass Estimation Model</h3>
-
-            <h4>Logistic Growth Model:</h4>
-            <pre style={styles.codeBlock}>
-{`// Growth follows S-curve (logistic function)
-growthFactor = 1 - e^(-r × age)
-
-Where:
-- r = species-specific growth rate
-- age = current forest age in years`}
-            </pre>
-
-            <h4>NDVI-Biomass Coupling:</h4>
-            <pre style={styles.codeBlock}>
-{`// NDVI indicates canopy density/health
-ndviFactor = min(1, NDVI / NDVIsaturation)
-
-// Final biomass calculation
-Biomass = YoungBiomass + (MaxBiomass - YoungBiomass) × growthFactor × ndviFactor`}
-            </pre>
-
-            <h4>Species-Specific Parameters (from Finnish Forest Research Institute):</h4>
-            <pre style={styles.codeBlock}>
-{`Pine:  Max 450 t/ha, growth rate 0.08/year, NDVI saturation 0.85
-Spruce: Max 500 t/ha, growth rate 0.07/year, NDVI saturation 0.88
-Birch: Max 300 t/ha, growth rate 0.12/year, NDVI saturation 0.82
-Aspen: Max 250 t/ha, growth rate 0.15/year, NDVI saturation 0.80`}
-            </pre>
-
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>6. Time Series Processing</h3>
-
-            <h4>Data Collection Strategy:</h4>
-            <ul style={{ marginLeft: '20px' }}>
-              <li><strong>Temporal range</strong>: Last 10 years of summer data</li>
-              <li><strong>Season</strong>: June-August only (peak growing season)</li>
-              <li><strong>Frequency</strong>: Every available cloud-free acquisition</li>
-              <li><strong>Result</strong>: ~50-150 data points over 10 years</li>
-            </ul>
-
-            <h4>Noise Reduction:</h4>
-            <pre style={styles.codeBlock}>
-{`// 7-day rolling average to smooth:
-// - Atmospheric variations
-// - Sensor calibration differences
-// - View angle effects
-// - Residual thin clouds`}
-            </pre>
-
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>7. GeoTIFF Processing</h3>
-
-            <p>The app receives NDVI data as 32-bit floating-point GeoTIFF:</p>
-
-            <pre style={styles.codeBlock}>
-{`// GeoTIFF structure:
-- Format: 3-band FLOAT32 (NDVI, NDMI, NDRE)
-- Compression: DEFLATE/LZW
-- Values: -1.0 to 1.0 per band
-- NoData: NaN (masked pixels)
-
-// Processing with GeoTIFF.js:
-const tiff = await GeoTIFF.fromArrayBuffer(response);
-const rasters = await image.readRasters();
-const ndviArray = rasters[0];   // Float32Array
-const ndmiArray = rasters[1];   // Moisture index
-const ndreArray = rasters[2];   // Red edge index`}
-            </pre>
-
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>8. Key Technical Features</h3>
-
-            <h4>Coordinate System Handling:</h4>
-            <ul style={{ marginLeft: '20px' }}>
-              <li><strong>Input</strong>: WGS84 (EPSG:4326) - latitude/longitude</li>
-              <li><strong>CRS</strong>: "http://www.opengis.net/def/crs/OGC/1.3/CRS84" (lon,lat order)</li>
-              <li><strong>Critical</strong>: Must convert from [lat,lng] to [lng,lat] for API</li>
-            </ul>
-
-            <h4>Performance Optimizations:</h4>
-            <ul style={{ marginLeft: '20px' }}>
-              <li>Adaptive resolution based on polygon size</li>
-              <li>Rate limiting: 500ms between API calls</li>
-              <li>Parallel processing where possible</li>
-              <li>Client-side caching of results</li>
-            </ul>
-
-            <h4>Quality Metrics Provided:</h4>
-            <ul style={{ marginLeft: '20px' }}>
-              <li><strong>Coverage %</strong>: Non-cloudy pixels in polygon</li>
-              <li><strong>Vegetation %</strong>: Pixels with NDVI &gt; 0.3</li>
-              <li><strong>Valid pixels</strong>: Total measurements used</li>
-              <li><strong>Rolling averages</strong>: Smoothed trends</li>
-            </ul>
-
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>9. Common Customer Questions & Answers</h3>
-
-            <p><strong>Q: How accurate is the biomass estimation?</strong><br/>
-            A: Typical accuracy is ±20-30% compared to field measurements. NDVI-based estimates are most accurate for relative changes rather than absolute values.</p>
-
-            <p><strong>Q: Why only summer data?</strong><br/>
-            A: Maximum vegetation activity, minimal snow cover, and best NDVI signal occur June-August in Finland.</p>
-
-            <p><strong>Q: What causes gaps in the time series?</strong><br/>
-            A: Persistent cloud cover. Finland can have weeks of cloudy weather preventing satellite observations.</p>
-
-            <p><strong>Q: Can this detect forest damage/disease?</strong><br/>
-            A: Yes - sudden NDVI drops indicate stress, damage, or harvesting. Gradual declines suggest disease or drought.</p>
-
-            <p><strong>Q: Why 10m resolution?</strong><br/>
-            A: Sentinel-2's red and NIR bands are natively 10m. This allows monitoring of ~0.01 hectare patches.</p>
-
-            <p><strong>Q: Processing time expectations?</strong><br/>
-            A: 3-10 minutes for full 10-year analysis, depending on polygon size and available acquisitions.</p>
-
-            <h3 style={{ marginTop: '20px', marginBottom: '10px', color: colors.medGreen }}>10. Data Validation & Error Handling</h3>
-
-            <p>The system includes multiple validation layers:</p>
-            <ul style={{ marginLeft: '20px' }}>
-              <li>Coordinate boundary checking</li>
-              <li>NDVI range validation (-1 to 1)</li>
-              <li>Cloud coverage thresholds</li>
-              <li>Minimum valid pixel requirements</li>
-              <li>Rate limit monitoring (per-user daily quotas)</li>
-            </ul>
-
-            <p style={{ marginTop: '20px', padding: '10px', backgroundColor: '#ecfdf5', borderRadius: '4px' }}>
-              This comprehensive system provides scientifically-grounded forest monitoring using ESA Sentinel-2 satellite data with regular updates every few days during growing season.
-            </p>
-          </div>
-        )}
-      </div>
-
       {error && (
         <div style={error.includes('Warning') ? styles.warning : styles.error}>
           <strong>{error.includes('Warning') ? 'Warning:' : 'Error:'}</strong> {error}
         </div>
       )}
 
-      <div style={styles.controls}>
+      <div className="dash-controls" style={styles.controls}>
         <div>
           <label style={styles.label}>Forest Type</label>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
@@ -2035,11 +1857,19 @@ const ndreArray = rasters[2];   // Red edge index`}
             min="11"
             max="100"
             value={estimateAgeMode && ageEstimate ? ageEstimate.estimatedAge : forestAge}
-            onChange={(e) => setForestAge(parseInt(e.target.value) || 20)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setForestAge(val === '' ? '' : parseInt(val) || '');
+            }}
             disabled={estimateAgeMode}
             placeholder={estimateAgeMode ? '--' : undefined}
             title="Enter the current age of the forest (e.g., if planted in 2000, enter 25 for year 2025)"
           />
+          {!estimateAgeMode && (forestAge === '' || forestAge == null) && (
+            <p style={{ fontSize: '12px', color: '#e53e3e', margin: '5px 0 0 0' }}>
+              Please enter a forest age to enable analysis
+            </p>
+          )}
           <p style={{ fontSize: '12px', color: '#666', margin: '5px 0 0 0' }}>
             Enter age as of {new Date().getFullYear()}. Analysis covers the last 10 years. (Min: 11 years)
           </p>
@@ -2157,7 +1987,7 @@ const ndreArray = rasters[2];   // Red edge index`}
         </div>
       )}
 
-      <div data-pdf-section="Map" style={styles.mapContainer}>
+      <div data-pdf-section="Map" className="dash-map" style={styles.mapContainer}>
         <MapContainer
           center={[62, 15]}
           zoom={4}
@@ -2215,14 +2045,21 @@ const ndreArray = rasters[2];   // Red edge index`}
         </MapContainer>
       </div>
 
-      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+      <SatelliteImagery
+        mapRef={mapRef}
+        dates={biomassData.length > 0 ? biomassData.map(d => d.date) : (vegetationStats?.data || []).map(d => d.interval.from.split('T')[0])}
+        selectedForest={selectedForests[selectedForestIndex] || null}
+        isDemo={isDemo}
+      />
+
+      <div className="dash-button-row" style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
         <button
           style={{
             ...styles.button,
-            ...(loading || selectedForests.length === 0 ? styles.buttonDisabled : {})
+            ...(loading || selectedForests.length === 0 || (!isDemo && !estimateAgeMode && (forestAge === '' || forestAge == null)) ? styles.buttonDisabled : {})
           }}
           onClick={isDemo ? loadDemoData : fetchSatelliteData}
-          disabled={loading || (selectedForests.length === 0 && !isDemo)}
+          disabled={loading || (selectedForests.length === 0 && !isDemo) || (!isDemo && !estimateAgeMode && (forestAge === '' || forestAge == null))}
         >
           {loading ? 'Processing Satellite Data...' : isDemo ? 'Load Demo Analysis' : 'Analyze with Sentinel-2 Process API'}
         </button>
@@ -2241,15 +2078,26 @@ const ndreArray = rasters[2];   // Red edge index`}
           <button
             style={{
               ...styles.button,
-              backgroundColor: colors.medGreen,
-              ...(savingForest ? styles.buttonDisabled : {}),
+              backgroundColor: loadedForestId ? colors.gray500 : colors.medGreen,
+              ...(savingForest || loadedForestId ? styles.buttonDisabled : {}),
             }}
             onClick={saveCurrentForest}
-            disabled={savingForest}
+            disabled={savingForest || !!loadedForestId || (forestAge === '' || forestAge == null)}
           >
-            {savingForest ? 'Saving...' : 'Save Forest'}
+            {savingForest ? 'Saving...' : loadedForestId ? 'Saved' : 'Save Forest'}
           </button>
         )}
+        <button
+          style={{
+            ...styles.button,
+            backgroundColor: '#6366f1',
+            ...(statsLoading || (!isDemo && selectedForests.length === 0) ? styles.buttonDisabled : {}),
+          }}
+          onClick={fetchVegetationStats}
+          disabled={statsLoading || (!isDemo && selectedForests.length === 0)}
+        >
+          {statsLoading ? 'Loading Statistics...' : 'Get Detailed Statistics'}
+        </button>
       </div>
 
       {!loading && biomassData.length > 0 && (
@@ -2262,7 +2110,7 @@ const ndreArray = rasters[2];   // Red edge index`}
       )}
 
       {selectedForests.length > 0 && (
-        <div data-pdf-section="Forest Info" style={styles.forestInfo}>
+        <div data-pdf-section="Forest Info" className="dash-forest-info" style={styles.forestInfo}>
           {selectedForests.map((forest, idx) => (
             <div
               key={forest.id}
@@ -2290,7 +2138,7 @@ const ndreArray = rasters[2];   // Red edge index`}
       )}
 
       {biomassData.length > 0 && (
-        <div data-pdf-section="Chart" style={styles.chartContainer}>
+        <div data-pdf-section="Chart" className="dash-chart-container" style={styles.chartContainer}>
           <div style={styles.buttonContainer}>
             <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>Satellite Data: NDVI & Biomass Trends <InfoButton id="mainChart" showInfo={showInfo} setShowInfo={setShowInfo}>
                 NDVI (Normalized Difference Vegetation Index) measures greenness from satellite red and near-infrared bands: (NIR − Red) / (NIR + Red), range 0–1. NDMI (Normalized Difference Moisture Index) measures canopy water content from NIR and SWIR bands. NDRE (Normalized Difference Red Edge) detects chlorophyll density from red-edge and NIR bands. Biomass is estimated from NDVI using a species-specific logistic growth model: biomass = youngBiomass + (maxBiomass − youngBiomass) × (1 − e<sup>−growthRate × age</sup>) × (NDVI / saturationNDVI). Rolling averages use a 7-observation window to smooth noise.
@@ -2317,6 +2165,22 @@ const ndreArray = rasters[2];   // Red edge index`}
                 title="PDF export requires Business plan"
               >
                 Export PDF
+              </button>
+            )}
+            <button
+              style={{ ...styles.exportButton, backgroundColor: '#8b5cf6' }}
+              onClick={exportToGeoJSON}
+              title="Export forest polygon as GeoJSON"
+            >
+              Export GeoJSON
+            </button>
+            {vegetationStats && (
+              <button
+                style={{ ...styles.exportButton, backgroundColor: '#6366f1' }}
+                onClick={downloadStatistics}
+                title="Download raw statistics JSON"
+              >
+                Download Statistics
               </button>
             )}
           </div>
@@ -2449,23 +2313,46 @@ const ndreArray = rasters[2];   // Red edge index`}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>NDVI Statistics</strong> <InfoButton id="ndviStats" showInfo={showInfo} setShowInfo={setShowInfo}>
                         Mean, min, max, and standard deviation of all NDVI values across satellite acquisitions. Vegetation coverage = percentage of acquisitions where the area was classified as forested (NDVI indicates active vegetation).
                       </InfoButton></div>
+                      {(() => {
+                        const firstNdvi = biomassData[0].ndvi;
+                        const lastNdvi = biomassData[biomassData.length - 1].ndvi;
+                        const years = (new Date(biomassData[biomassData.length - 1].date) - new Date(biomassData[0].date)) / 31536000000;
+                        const totalNdviChange = years > 0 && firstNdvi > 0 ? ((lastNdvi - firstNdvi) / firstNdvi) * 100 : 0;
+                        const annualNdviChange = years > 0 ? totalNdviChange / years : 0;
+                        return (
                       <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
                         <li>Mean NDVI: {(biomassData.reduce((sum, d) => sum + d.ndvi, 0) / biomassData.length).toFixed(4)}</li>
                         <li>NDVI Range: {Math.min(...biomassData.map(d => d.ndvi)).toFixed(4)} to {Math.max(...biomassData.map(d => d.ndvi)).toFixed(4)}</li>
                         <li>NDVI Std Dev: {(Math.sqrt(biomassData.reduce((sum, d) => sum + Math.pow(d.ndvi - biomassData.reduce((s, x) => s + x.ndvi, 0) / biomassData.length, 2), 0) / biomassData.length)).toFixed(4)}</li>
                         <li>Vegetation Coverage: {(biomassData.filter(d => d.isForested).length / biomassData.length * 100).toFixed(1)}%</li>
+                        <li>NDVI Change/Year: {annualNdviChange >= 0 ? '+' : ''}{annualNdviChange.toFixed(2)}%</li>
+                        <li>Total NDVI Change: {totalNdviChange >= 0 ? '+' : ''}{totalNdviChange.toFixed(2)}% ({years.toFixed(1)} years)</li>
                       </ul>
+                        );
+                      })()}
                     </div>
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>Biomass Estimates</strong> <InfoButton id="biomassEstimates" showInfo={showInfo} setShowInfo={setShowInfo}>
                         Biomass (tons/ha) is estimated from each NDVI reading using a logistic growth curve calibrated per species. Parameters: pine max 450 t/ha at growth rate 0.08, spruce 500 t/ha at 0.07, birch 300 t/ha at 0.12, aspen 250 t/ha at 0.15. Current and initial values are the last and first observations. Annual growth rate = (current − initial) / years elapsed.
                       </InfoButton></div>
+                      {(() => {
+                        const firstBio = biomassData[0].biomassRollingAvg ?? biomassData[0].biomass;
+                        const lastBio = biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass;
+                        const years = (new Date(biomassData[biomassData.length - 1].date) - new Date(biomassData[0].date)) / 31536000000;
+                        const totalBioChange = years > 0 && firstBio > 0 ? ((lastBio - firstBio) / firstBio) * 100 : 0;
+                        const annualBioChange = years > 0 ? totalBioChange / years : 0;
+                        const annualGrowth = years > 0 ? (lastBio - firstBio) / years : 0;
+                        return (
                       <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
-                        <li>Current Biomass: {(biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass).toFixed(2)} tons/ha</li>
-                        <li>Initial Biomass: {(biomassData[0].biomassRollingAvg ?? biomassData[0].biomass).toFixed(2)} tons/ha</li>
-                        <li>Total Accumulation: {((biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass) - (biomassData[0].biomassRollingAvg ?? biomassData[0].biomass)).toFixed(2)} tons/ha</li>
-                        <li>Annual Growth Rate: {(((biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass) - (biomassData[0].biomassRollingAvg ?? biomassData[0].biomass)) / ((new Date(biomassData[biomassData.length - 1].date) - new Date(biomassData[0].date)) / 31536000000)).toFixed(2)} tons/ha/year</li>
+                        <li>Current Biomass: {lastBio.toFixed(2)} tons/ha</li>
+                        <li>Initial Biomass: {firstBio.toFixed(2)} tons/ha</li>
+                        <li>Total Accumulation: {(lastBio - firstBio).toFixed(2)} tons/ha</li>
+                        <li>Annual Growth Rate: {annualGrowth.toFixed(2)} tons/ha/year</li>
+                        <li>Biomass Change/Year: {annualBioChange >= 0 ? '+' : ''}{annualBioChange.toFixed(2)}%</li>
+                        <li>Total Biomass Change: {totalBioChange >= 0 ? '+' : ''}{totalBioChange.toFixed(2)}% ({years.toFixed(1)} years)</li>
                       </ul>
+                        );
+                      })()}
                     </div>
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><strong>Data Quality Metrics</strong> <InfoButton id="dataQuality" showInfo={showInfo} setShowInfo={setShowInfo}>
@@ -2519,6 +2406,47 @@ const ndreArray = rasters[2];   // Red edge index`}
               </div>
             )}
 
+            {biomassData.length > 0 && (() => {
+              const sq = assessSiteQuality(
+                biomassData,
+                healthEstimate,
+                vegetationStats,
+                selectedForests[selectedForestIndex].type,
+                forestAge
+              );
+              if (!sq || !sq.insights || sq.insights.length === 0) return null;
+              const insightColors = { positive: '#27ae60', warning: '#f39c12', critical: '#e74c3c', info: '#3498db' };
+              return (
+                <div data-pdf-section="Forest Insights" style={{ marginBottom: '15px' }}>
+                  <h4 style={{ margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    Forest Insights
+                    <span style={{
+                      fontSize: '11px', fontWeight: 'bold', padding: '2px 10px', borderRadius: '10px',
+                      color: '#fff',
+                      backgroundColor: sq.siteQualityIndex > 1.05 ? '#27ae60' : sq.siteQualityIndex < 0.95 ? '#e74c3c' : '#95a5a6'
+                    }}>
+                      Site Quality: {sq.siteQualityIndex.toFixed(2)}×
+                    </span>
+                    <span style={{ fontSize: '10px', color: '#888', fontWeight: 'normal' }}>
+                      Confidence: {sq.confidence}
+                    </span>
+                  </h4>
+                  <div style={{ padding: '10px 15px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
+                    {sq.insights.map((insight, i) => (
+                      <div key={i} style={{ fontSize: '13px', marginBottom: i < sq.insights.length - 1 ? '6px' : 0, display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                        <span style={{
+                          display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%',
+                          backgroundColor: insightColors[insight.type] || '#888',
+                          marginTop: '5px', flexShrink: 0
+                        }} />
+                        <span style={{ color: '#333' }}>{insight.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             {biomassData.length > 0 && (
               <div data-pdf-section="Timber Value">
                 <h4>3. Timber Value & Harvest Analysis</h4>
@@ -2529,6 +2457,8 @@ const ndreArray = rasters[2];   // Red edge index`}
                   areaHectares={parseFloat(selectedForests[selectedForestIndex].area)}
                   showInfo={showInfo}
                   setShowInfo={setShowInfo}
+                  healthEstimate={healthEstimate}
+                  vegetationStats={vegetationStats}
                 />
               </div>
             )}
@@ -2539,7 +2469,7 @@ const ndreArray = rasters[2];   // Red edge index`}
               const currentArea = parseFloat(selectedForests[selectedForestIndex].area);
               const latestBiomass = biomassData[biomassData.length - 1].biomassRollingAvg ?? biomassData[biomassData.length - 1].biomass;
               const priceRange = calculatePriceRange(latestBiomass, currentType, forestAge, currentArea);
-              const harvestDelay = analyzeHarvestDelay(currentType, forestAge, currentArea);
+              const harvestDelay = analyzeHarvestDelay(currentType, forestAge, currentArea, undefined, { currentBiomass: latestBiomass });
 
               return (
                 <div data-pdf-section="Timber Market">
@@ -3153,7 +3083,7 @@ const ndreArray = rasters[2];   // Red edge index`}
 
               const assetSummary = generateAssetSummary(timberVal.totalValue, landVal, creditVal.totalValue, currentArea);
               const inheritanceTax = calculateInheritanceTax(assetSummary.totalValue);
-              const scenarios = projectManagementScenarios(currentType, forestAge, currentArea, 30);
+              const scenarios = projectManagementScenarios(currentType, forestAge, currentArea, 30, { currentBiomass: latestBiomass });
               const activeWorkload = estimateManagementWorkload(currentArea, 'active');
               const holdWorkload = estimateManagementWorkload(currentArea, 'hold');
 
@@ -3263,6 +3193,11 @@ const ndreArray = rasters[2];   // Red edge index`}
           </div>
         </div>
       )}
+
+      {(vegetationStats || statsLoading) && (
+        <VegetationStatistics data={vegetationStats} loading={statsLoading} />
+      )}
+
       <div style={{ borderTop: `1px solid ${colors.gray200}`, marginTop: '24px', paddingTop: '16px', textAlign: 'center' }}>
         <p style={{ fontSize: '12px', color: colors.gray500 }}>
           <strong>Author:</strong> <a href="https://x.com/robertkottelin" target="_blank" rel="noopener noreferrer">@robertkottelin</a>

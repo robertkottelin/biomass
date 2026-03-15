@@ -53,6 +53,10 @@ export const REGENERATION_COST = {
   aspen: 800
 };
 
+// Minimum stem growth rate (t/ha/yr) for healthy forests where NDVI has saturated
+// NDVI plateaus after canopy closure (~age 25-30) but stem diameter growth continues
+export const MIN_HEALTHY_GROWTH = { pine: 3.0, fir: 3.5, birch: 2.5, aspen: 2.0 };
+
 // Real discount rate for forestry NPV calculations
 export const FORESTRY_DISCOUNT_RATE = 0.03;
 
@@ -96,9 +100,13 @@ export function projectCarbonStock(currentBiomass, forestType, currentAge, areaH
   const params = forestParams[type];
   const points = [];
 
+  // Scale theoretical projection to anchor at observed currentBiomass
+  const theoreticalNow = estimateBiomass(params.ndviSaturation || 0.85, type, 0, currentAge);
+  const scaleFactor = (currentBiomass > 0 && theoreticalNow > 0) ? currentBiomass / theoreticalNow : 1;
+
   for (let y = 0; y <= projectionYears; y++) {
     const age = currentAge + y;
-    const biomass = estimateBiomass(1.0 * (params.ndviSaturation || 0.85), type, y, currentAge);
+    const biomass = estimateBiomass(params.ndviSaturation || 0.85, type, y, currentAge) * scaleFactor;
     const carbon = biomassToCarbon(biomass, type);
 
     const prevCo2e = y > 0 ? points[y - 1].co2ePerHa : null;
@@ -187,13 +195,65 @@ export function compareScenarios(currentBiomass, forestType, currentAge, areaHec
   };
 }
 
-export function projectForestValue(forestType, areaHectares, projectionYears = 100) {
+export function projectForestValue(forestType, areaHectares, projectionYears = 100, options = {}) {
   const type = (forestType && forestParams[forestType]) ? forestType : 'pine';
   const params = forestParams[type];
   const points = [];
 
+  // When observed growth data is available, use it for ages >= currentAge
+  const { currentAge, siteQuality } = options;
+  const observedGrowth = siteQuality?.observedBiomassGrowth;
+  const projectionBase = observedGrowth?.latestNdviBiomass;
+  let effectiveRate = null;
+
+  if (observedGrowth && projectionBase && currentAge != null) {
+    const observedRate = observedGrowth.annualGrowthRate || 0;
+    const minGrowth = MIN_HEALTHY_GROWTH[type] || MIN_HEALTHY_GROWTH.pine;
+    effectiveRate = observedRate;
+    if (observedGrowth.latestNdvi != null) {
+      const ndviRatio = observedGrowth.latestNdvi / params.ndviSaturation;
+      const ndviTrend = observedGrowth.ndviSlope || 0;
+      if (ndviRatio >= 0.7 && ndviTrend >= -0.005 && observedRate < minGrowth) {
+        effectiveRate = minGrowth;
+      }
+    }
+  }
+
+  // Soft cap: logarithmic overshoot up to 10% beyond max
+  const softCap = (projected, max) => {
+    if (projected <= max) return projected;
+    const overshoot = projected - max;
+    return max + max * 0.1 * (1 - Math.exp(-overshoot / (max * 0.1)));
+  };
+
+  // When observed data is available, scale the theoretical curve so it passes through
+  // projectionBase at currentAge, avoiding a visual discontinuity on the chart.
+  // For ages beyond currentAge, project forward using effective growth rate.
+  let biomassCorrectionFactor = 1;
+  if (effectiveRate != null && currentAge != null && currentAge > 0 && projectionBase) {
+    const theoreticalAtCurrentAge = estimateBiomass(params.ndviSaturation, type, 0, currentAge);
+    if (theoreticalAtCurrentAge > 0) {
+      biomassCorrectionFactor = projectionBase / theoreticalAtCurrentAge;
+    }
+  }
+
   for (let age = 0; age <= projectionYears; age++) {
-    const biomass = estimateBiomass(params.ndviSaturation, type, age, 0);
+    let biomass;
+
+    if (effectiveRate != null && currentAge != null && age >= currentAge) {
+      const yrs = age - currentAge;
+      if (effectiveRate > 0 && yrs > 0) {
+        const integratedGrowth = effectiveRate * (20 / Math.LN2) * (1 - Math.pow(0.5, yrs / 20));
+        biomass = softCap(projectionBase + integratedGrowth, params.maxBiomass);
+      } else if (effectiveRate < 0 && yrs > 0) {
+        biomass = Math.max(params.youngBiomass, projectionBase + effectiveRate * yrs);
+      } else {
+        biomass = projectionBase;
+      }
+    } else {
+      biomass = estimateBiomass(params.ndviSaturation, type, age, 0) * biomassCorrectionFactor;
+    }
+
     const timber = estimateTimberValue(biomass, type, age, areaHectares);
     points.push({
       age,
@@ -249,20 +309,105 @@ export function findOptimalHarvestYear(forestType, currentAge, currentBiomass, a
   const regenCost = regenCostPerHa * areaHectares;
   const minAge = MIN_HARVEST_AGE[type] || MIN_HARVEST_AGE.pine;
 
+  // Site quality integration (optional)
+  const sq = options.siteQuality || null;
+  const siteQualityIndex = sq ? sq.siteQualityIndex : 1.0;
+  const harvestUrgency = sq ? sq.harvestUrgency : 0;
+
   // Faustmann-optimal rotation for second generation (bare-land start)
   const faustmann = findOptimalHarvest(type, areaHectares, options);
   const rotationAge = faustmann.optimalAge;
   const secondGenValue = faustmann.valueAtHarvest;
 
-  // Anchor to real satellite data via scale factor
-  const theoreticalBiomass = estimateBiomass(params.ndviSaturation, type, 0, currentAge);
-  const biomassScaleFactor = (currentAge >= 10 && theoreticalBiomass > 0)
-    ? currentBiomass / theoreticalBiomass
-    : 1;
+  // Anchor to real satellite data via scale factor (only used in fallback when no observed growth)
+  const observedGrowth = sq?.observedBiomassGrowth;
+  let biomassScaleFactor = 1;
+  let adjustedScaleFactor = siteQualityIndex;
+  if (!observedGrowth) {
+    const theoreticalBiomass = estimateBiomass(params.ndviSaturation, type, 0, currentAge);
+    biomassScaleFactor = (currentAge >= 10 && theoreticalBiomass > 0)
+      ? currentBiomass / theoreticalBiomass
+      : 1;
+    adjustedScaleFactor = biomassScaleFactor * siteQualityIndex;
+  }
 
-  // Projected timber value at a given age, scaled by satellite data
-  const valueAt = (age) => {
-    const biomass = estimateBiomass(params.ndviSaturation, type, 0, age) * biomassScaleFactor;
+  const observedGrowthRate = observedGrowth ? observedGrowth.annualGrowthRate : 0;
+
+  // Effective growth rate: when NDVI is healthy and non-declining but observed
+  // biomass growth is near zero (NDVI saturates at canopy closure), apply a
+  // species-specific minimum stem growth rate
+  const minGrowth = MIN_HEALTHY_GROWTH[type] || MIN_HEALTHY_GROWTH.pine;
+  let effectiveGrowthRate = observedGrowthRate;
+  if (observedGrowth && observedGrowth.latestNdvi != null) {
+    const ndviRatio = observedGrowth.latestNdvi / params.ndviSaturation;
+    const ndviTrend = observedGrowth.ndviSlope || 0;
+    if (ndviRatio >= 0.7 && ndviTrend >= -0.005 && observedGrowthRate < minGrowth) {
+      effectiveGrowthRate = minGrowth;
+    }
+  }
+
+  // Use NDVI-derived biomass (age-independent) as projection baseline instead of
+  // the age-model-distorted currentBiomass. This prevents age misentry from inflating
+  // the base and making the forest look near-maxed.
+  const projectionBase = observedGrowth?.latestNdviBiomass || currentBiomass;
+
+  // For healthy, growing forests: reduce effective discount rate
+  // reflecting lower biological risk and observed real appreciation
+  let effectiveDiscountRate = discountRate;
+  if (harvestUrgency <= 5) {
+    // SQI-based reduction: excellent sites have lower risk
+    if (siteQualityIndex > 1.05) {
+      effectiveDiscountRate *= (1 - Math.min((siteQualityIndex - 1.0) * 2, 0.3));
+    }
+    // Growth-based reduction: actively growing forests are appreciating assets
+    // Use NDVI-based biomass as denominator to avoid age-model inflation
+    if (effectiveGrowthRate > 0 && projectionBase > 0) {
+      const biomassAppreciation = effectiveGrowthRate / projectionBase;
+      if (biomassAppreciation > 0.01) {
+        // Scale reduction: 1% appreciation → 20% reduction, 5%+ → 60% reduction
+        const reductionFactor = Math.min(biomassAppreciation * 12, 0.6);
+        effectiveDiscountRate *= (1 - reductionFactor);
+      }
+    }
+  }
+
+  // Projected timber value at a given age
+  // When we have observed growth data from satellite, use it to project biomass forward
+  // instead of relying on the theoretical curve (which saturates and underestimates growth
+  // for forests that are still actively growing).
+  // Soft biomass cap: instead of hard Math.min(projected, max), allow logarithmic
+  // overshoot up to 10% beyond nominal max. Prevents "hit cap → zero growth → harvest now" cliff.
+  const softCap = (projected, max) => {
+    if (projected <= max) return projected;
+    // Logarithmic overshoot: up to 10% beyond max
+    const overshoot = projected - max;
+    const softOvershoot = max * 0.1 * (1 - Math.exp(-overshoot / (max * 0.1)));
+    return max + softOvershoot;
+  };
+
+  const valueAt = (age, yearsFromCurrent) => {
+    const yrs = yearsFromCurrent || 0;
+
+    if (effectiveGrowthRate > 0 && yrs > 0 && harvestUrgency <= 5) {
+      // Project from NDVI-based biomass (age-independent) using effective growth rate
+      // This avoids the age-model inflation that makes forests look near-maxed
+      // Half-life dampening — growth rate halves every 20 years
+      const integratedGrowth = effectiveGrowthRate * (20 / Math.LN2) * (1 - Math.pow(0.5, yrs / 20));
+      const projectedBiomass = projectionBase + integratedGrowth;
+      // Soft cap at species maximum (allows slight overshoot)
+      const biomass = softCap(projectedBiomass, params.maxBiomass);
+      return estimateTimberValue(biomass, type, age, areaHectares).totalValue;
+    }
+
+    if (observedGrowthRate < 0 && yrs > 0) {
+      // Declining forest: project loss forward
+      const integratedLoss = observedGrowthRate * yrs; // negative
+      const projectedBiomass = Math.max(params.youngBiomass, projectionBase + integratedLoss);
+      return estimateTimberValue(projectedBiomass, type, age, areaHectares).totalValue;
+    }
+
+    // Fallback: theoretical curve with scale factor
+    const biomass = estimateBiomass(params.ndviSaturation, type, 0, age) * adjustedScaleFactor;
     return estimateTimberValue(biomass, type, age, areaHectares).totalValue;
   };
 
@@ -270,18 +415,24 @@ export function findOptimalHarvestYear(forestType, currentAge, currentBiomass, a
 
   // Two-generation NPV: find first-harvest age T that maximizes
   // NPV(T) = [V_scaled(T) - C] / (1+r)^(T-now) + [V(R) - C] / (1+r)^(T-now+R)
-  const startAge = Math.max(minAge, currentAge);
+  // When observed growth is strong, also account for the opportunity cost of replanting:
+  // each year you delay, you earn real growth on the standing timber vs. starting a new
+  // rotation from zero. The "marginal value of waiting" must exceed the discount rate.
+  // Expand search range earlier when urgency is present
+  const adjustedStartAge = Math.max(minAge, Math.max(minAge, currentAge) - Math.min(harvestUrgency, Math.max(minAge, currentAge) - minAge));
+  const startAge = Math.max(minAge, adjustedStartAge);
   const maxCandidateAge = currentAge + 40;
   let bestT = startAge;
   let bestNPV = -Infinity;
 
   for (let T = startAge; T <= maxCandidateAge; T++) {
     const yearsUntilT = T - currentAge;
-    const discountFirst = Math.pow(1 + discountRate, yearsUntilT);
-    const discountSecond = Math.pow(1 + discountRate, yearsUntilT + rotationAge);
+    const discountFirst = Math.pow(1 + effectiveDiscountRate, yearsUntilT);
+    const discountSecond = Math.pow(1 + effectiveDiscountRate, yearsUntilT + rotationAge);
 
-    const npv = (valueAt(T) - regenCost) / discountFirst
-              + (secondGenValue - regenCost) / discountSecond;
+    const firstGenNPV = (valueAt(T, yearsUntilT) - regenCost) / discountFirst;
+    const secondGenNPV = (secondGenValue - regenCost) / discountSecond;
+    const npv = firstGenNPV + secondGenNPV;
 
     if (npv > bestNPV) {
       bestNPV = npv;
@@ -289,10 +440,49 @@ export function findOptimalHarvestYear(forestType, currentAge, currentBiomass, a
     }
   }
 
+  // Marginal value check: if the forest is actively growing and healthy, compare
+  // the value gained by waiting one more year vs the discount cost of waiting.
+  // This prevents the two-generation NPV from being biased toward early harvest
+  // when the standing timber is still appreciating faster than the discount rate.
+  if (effectiveGrowthRate > 0 && harvestUrgency <= 5) {
+    let T = bestT;
+    while (T < maxCandidateAge) {
+      const currentVal = valueAt(T, T - currentAge);
+      const nextVal = valueAt(T + 1, T + 1 - currentAge);
+      const marginalReturn = (nextVal - currentVal) / currentVal;
+      // Keep waiting as long as the marginal return on standing timber exceeds
+      // the effective discount rate (i.e., it's more valuable to let it grow)
+      if (marginalReturn > effectiveDiscountRate) {
+        T++;
+      } else {
+        break;
+      }
+    }
+    bestT = T;
+  }
+
+  // NDVI health delay: if NDVI is high and not declining, enforce a minimum wait
+  // regardless of what NPV says. Biological criterion: healthy forests should not
+  // be harvested just because NDVI-measured growth is near zero (stem growth continues).
+  if (observedGrowth && observedGrowth.latestNdvi != null) {
+    const ndviRatio = observedGrowth.latestNdvi / params.ndviSaturation;
+    const ndviTrend = observedGrowth.ndviSlope || 0;
+    // 0 at 50% saturation, 1 at 80%+
+    const ndviHealthLevel = Math.max(0, Math.min(1, (ndviRatio - 0.5) / 0.3));
+
+    let healthDelay = 0;
+    if (ndviTrend >= 0.005)       healthDelay = Math.round(ndviHealthLevel * 20); // growing
+    else if (ndviTrend >= -0.005) healthDelay = Math.round(ndviHealthLevel * 15); // stable
+    else if (ndviTrend >= -0.01)  healthDelay = Math.round(ndviHealthLevel * 8);  // slight decline
+    // else: significant decline → no delay
+
+    if (healthDelay > 0) bestT = Math.max(bestT, Math.max(minAge, currentAge + healthDelay));
+  }
+
   const harvestYear = bestT;
   const yearsFromNow = harvestYear - currentAge;
   const annualGrowthRate = currentValue > 0
-    ? (valueAt(currentAge + 1) - currentValue) / currentValue : 0;
+    ? (valueAt(currentAge + 1, 1) - currentValue) / currentValue : 0;
 
   let recommendation;
   if (yearsFromNow <= 0) {
@@ -303,14 +493,39 @@ export function findOptimalHarvestYear(forestType, currentAge, currentBiomass, a
     recommendation = `Wait ${yearsFromNow} years (age ${harvestYear})`;
   }
 
+  // Append site-quality context to recommendation
+  if (sq) {
+    const adjustmentReason = buildAdjustmentReason(sq);
+    if (adjustmentReason) {
+      recommendation += ` — ${adjustmentReason}`;
+    }
+  }
+
   return {
     harvestYear, yearsFromNow, currentValue,
-    valueAtHarvest: valueAt(harvestYear),
+    valueAtHarvest: valueAt(harvestYear, yearsFromNow),
     annualGrowthRate, rotationAge, recommendation, biomassScaleFactor,
+    siteQualityIndex, harvestUrgency,
+    adjustmentReason: sq ? buildAdjustmentReason(sq) : null,
   };
 }
 
-export function projectHarvestCycle(forestType, areaHectares, totalYears = 100) {
+function buildAdjustmentReason(sq) {
+  const parts = [];
+  if (sq.harvestUrgency > 5) {
+    parts.push('adjusted earlier due to health decline');
+  } else if (sq.harvestUrgency > 0) {
+    parts.push('minor health adjustment applied');
+  }
+  if (sq.siteQualityIndex > 1.1) {
+    parts.push('excellent site quality supports later harvest');
+  } else if (sq.siteQualityIndex < 0.85) {
+    parts.push('below-average site quality');
+  }
+  return parts.join(', ') || null;
+}
+
+export function projectHarvestCycle(forestType, areaHectares, totalYears = 100, options = {}) {
   const type = (forestType && forestParams[forestType]) ? forestType : 'pine';
   const optimal = findOptimalHarvest(type, areaHectares);
   const cycleLength = optimal.optimalAge;
@@ -318,17 +533,28 @@ export function projectHarvestCycle(forestType, areaHectares, totalYears = 100) 
   const points = [];
   let cumulativeHarvestIncome = 0;
 
+  // Scale theoretical curve to match real observed biomass when available
+  const { currentBiomass, currentAge } = options;
+  let scaleFactor = 1;
+  if (currentBiomass > 0 && currentAge > 0) {
+    const theoreticalNow = estimateBiomass(params.ndviSaturation, type, 0, currentAge);
+    if (theoreticalNow > 0) scaleFactor = currentBiomass / theoreticalNow;
+  }
+
   for (let year = 0; year <= totalYears; year++) {
     const ageInCycle = cycleLength > 0 ? year % cycleLength : year;
     const isHarvestYear = cycleLength > 0 && year > 0 && ageInCycle === 0;
+    // Only apply scale factor during the first cycle (before first harvest)
+    const isFirstCycle = cycleLength > 0 ? year < cycleLength : true;
+    const sf = isFirstCycle ? scaleFactor : 1;
 
     if (isHarvestYear) {
-      const matureBiomass = estimateBiomass(params.ndviSaturation, type, cycleLength, 0);
+      const matureBiomass = estimateBiomass(params.ndviSaturation, type, cycleLength, 0) * sf;
       const harvestTimber = estimateTimberValue(matureBiomass, type, cycleLength, areaHectares);
       cumulativeHarvestIncome += harvestTimber.totalValue;
     }
 
-    const biomass = estimateBiomass(params.ndviSaturation, type, ageInCycle, 0);
+    const biomass = estimateBiomass(params.ndviSaturation, type, ageInCycle, 0) * sf;
     const timber = estimateTimberValue(biomass, type, ageInCycle, areaHectares);
 
     points.push({
@@ -361,14 +587,17 @@ export function estimateTimberValue(biomassPerHa, forestType, forestAge, areaHec
   // Convert biomass (tons/ha) to volume (m³/ha)
   const volumePerHa = biomassPerHa / density;
 
-  // Sawlog fraction by age: <30yr mostly pulpwood, >60yr mostly sawlog, linear interpolation
+  // Sawlog fraction by age: <30yr mostly pulpwood, increases with age as trunk diameter grows
+  // 30→60yr: rapid increase (0.1→0.7), 60→100yr: continued slow increase (0.7→0.85)
   let sawlogFraction;
   if (forestAge <= 30) {
     sawlogFraction = 0.1;
-  } else if (forestAge >= 60) {
-    sawlogFraction = 0.7;
-  } else {
+  } else if (forestAge <= 60) {
     sawlogFraction = 0.1 + (0.6 * (forestAge - 30) / 30);
+  } else if (forestAge <= 100) {
+    sawlogFraction = 0.7 + (0.15 * (forestAge - 60) / 40);
+  } else {
+    sawlogFraction = 0.85;
   }
 
   // Aspen has no sawlog market

@@ -4,6 +4,7 @@
 
 body {
   margin: 0;
+  overflow-x: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
@@ -75,5 +76,89 @@ code {
   }
   .landing-login-card {
     padding: 24px !important;
+  }
+
+  /* Dashboard nav responsive */
+  .dash-nav-inner {
+    height: auto !important;
+    min-height: 48px;
+    flex-wrap: wrap !important;
+    padding: 8px 12px !important;
+    gap: 8px;
+  }
+  .dash-brand {
+    font-size: 16px !important;
+  }
+  .dash-nav-right {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    justify-content: flex-end;
+  }
+  .dash-nav-right .dash-nav-email {
+    width: 100%;
+    text-align: right;
+    font-size: 11px !important;
+    order: -1;
+  }
+
+  /* Dashboard container responsive */
+  .dash-container {
+    padding: 12px !important;
+    margin-top: 0 !important;
+  }
+  .dash-header {
+    font-size: 18px !important;
+  }
+  .dash-controls {
+    grid-template-columns: 1fr !important;
+    padding: 12px !important;
+  }
+  .dash-map {
+    height: 300px !important;
+  }
+  .dash-chart-container {
+    padding: 12px !important;
+  }
+  .dash-forest-info {
+    grid-template-columns: 1fr !important;
+  }
+  .dash-button-row {
+    flex-wrap: wrap !important;
+  }
+  .dash-button-row button {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 13px !important;
+    padding: 8px 12px !important;
+  }
+}
+
+/* Recharts overflow fix for all sizes */
+.recharts-wrapper {
+  max-width: 100%;
+}
+
+/* Small phones */
+@media (max-width: 480px) {
+  .dash-nav-inner {
+    padding: 6px 8px !important;
+  }
+  .dash-nav-right {
+    gap: 6px !important;
+    font-size: 11px;
+  }
+  .dash-nav-right button {
+    font-size: 11px !important;
+    padding: 3px 8px !important;
+  }
+  .dash-container {
+    padding: 8px !important;
+  }
+  .dash-map {
+    height: 250px !important;
+  }
+  .dash-controls {
+    padding: 8px !important;
+    gap: 10px !important;
   }
 }

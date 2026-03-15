@@ -32,7 +32,7 @@ export const BIODIVERSITY_PARAMS = {
   }
 };
 
-export function estimateBiodiversity(biomassData, treeEstimate, healthEstimate, forestType, forestAge, areaHectares) {
+export function estimateBiodiversity(biomassData, treeEstimate, healthEstimate, forestType, forestAge, areaHectares, vegetationStats) {
   if (!biomassData || biomassData.length === 0) return null;
 
   const type = (forestType && BIODIVERSITY_PARAMS[forestType]) ? forestType : 'pine';
@@ -41,10 +41,22 @@ export function estimateBiodiversity(biomassData, treeEstimate, healthEstimate, 
 
   // --- 1. Structural Diversity (40%) ---
   const latestData = biomassData[biomassData.length - 1];
-  const ndviRange = (latestData.ndviMax != null && latestData.ndviMin != null)
-    ? (latestData.ndviMax - latestData.ndviMin) / 4
-    : 0;
-  const ndviVarianceScore = Math.min(1, ndviRange / params.maxNdviStdDev) * 100;
+  let ndviVarianceScore;
+  // Use actual stDev from vegetation stats if available
+  if (vegetationStats && vegetationStats.data && vegetationStats.data.length > 0) {
+    const latest = vegetationStats.data[vegetationStats.data.length - 1];
+    const actualStdDev = latest.outputs?.ndvi?.bands?.B0?.stats?.stDev;
+    if (actualStdDev != null) {
+      ndviVarianceScore = Math.min(1, actualStdDev / params.maxNdviStdDev) * 100;
+    }
+  }
+  // Fallback to estimated range
+  if (ndviVarianceScore == null) {
+    const ndviRange = (latestData.ndviMax != null && latestData.ndviMin != null)
+      ? (latestData.ndviMax - latestData.ndviMin) / 4
+      : 0;
+    ndviVarianceScore = Math.min(1, ndviRange / params.maxNdviStdDev) * 100;
+  }
 
   // Canopy cover optimality: 60-85% is ideal for biodiversity
   const canopyCover = treeEstimate ? parseFloat(treeEstimate.canopyCover) : 70;

@@ -19,6 +19,26 @@ router.get('/demo/sample', (req, res, next) => {
   }
 });
 
+// GET /api/forests/demo/statistics — no auth required
+router.get('/demo/statistics', (req, res, next) => {
+  try {
+    const demoStats = require('../fixtures/demo-statistics.json');
+    res.json(demoStats);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/forests/demo/imagery — no auth required, returns demo PNG
+router.get('/demo/imagery', (req, res, next) => {
+  try {
+    const imagePath = path.join(__dirname, '..', 'fixtures', 'demo-imagery.png');
+    res.sendFile(imagePath);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/forests — list user's forests
 router.get('/', requireAuth, async (req, res, next) => {
   try {
