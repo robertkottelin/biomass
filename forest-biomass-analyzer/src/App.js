@@ -1389,13 +1389,13 @@ const ForestBiomassApp = () => {
       fontSize: '15px',
       fontWeight: 600,
       cursor: 'pointer',
-      marginLeft: '10px'
     },
     buttonContainer: {
       display: 'flex',
       alignItems: 'center',
       gap: '10px',
-      marginBottom: '20px'
+      marginBottom: '20px',
+      flexWrap: 'wrap',
     },
     checkbox: {
       marginRight: '8px'
@@ -1424,7 +1424,8 @@ const ForestBiomassApp = () => {
       right: 0,
       backgroundColor: colors.darkGreen,
       zIndex: 1000,
-      boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+      boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+      overflowX: 'hidden',
     },
     dashNavInner: {
       maxWidth: '1200px',
@@ -1433,7 +1434,9 @@ const ForestBiomassApp = () => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      height: '64px'
+      minHeight: '64px',
+      flexWrap: 'wrap',
+      gap: '8px',
     },
     dashBrand: {
       fontSize: '20px',
@@ -1448,7 +1451,10 @@ const ForestBiomassApp = () => {
     dashNavRight: {
       display: 'flex',
       alignItems: 'center',
-      gap: '16px'
+      gap: '10px',
+      flexWrap: 'wrap',
+      justifyContent: 'flex-end',
+      minWidth: 0,
     },
     dashNavLink: {
       color: colors.paleGreen,
