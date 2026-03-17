@@ -13,7 +13,12 @@ import {
   CARBON_FRACTION,
   CO2_PER_CARBON,
   BELOW_GROUND_RATIO,
-  SOIL_CARBON_TONS_PER_HA
+  SOIL_CARBON_TONS_PER_HA,
+  PEAK_PRODUCTIVE_AGE,
+  MIN_HARVEST_AGE,
+  computeHealthAdjustedPeakAge,
+  computeSenescenceFactor,
+  computeQualityDegradation
 } from './carbonCalculation';
 
 describe('biomassToCarbon', () => {
@@ -687,5 +692,200 @@ describe('findOptimalHarvestYear', () => {
       const minAge = type === 'aspen' ? 35 : type === 'birch' ? 50 : 60;
       expect(result.harvestYear).toBeGreaterThanOrEqual(minAge);
     });
+  });
+});
+
+describe('computeHealthAdjustedPeakAge', () => {
+  test('returns base peak age without siteQuality', () => {
+    expect(computeHealthAdjustedPeakAge('pine', null)).toBe(PEAK_PRODUCTIVE_AGE.pine);
+    expect(computeHealthAdjustedPeakAge('birch', null)).toBe(PEAK_PRODUCTIVE_AGE.birch);
+    expect(computeHealthAdjustedPeakAge('aspen', undefined)).toBe(PEAK_PRODUCTIVE_AGE.aspen);
+  });
+
+  test('high SQI with low urgency increases peak age', () => {
+    const sq = { siteQualityIndex: 1.3, harvestUrgency: 0 };
+    const result = computeHealthAdjustedPeakAge('pine', sq);
+    expect(result).toBeGreaterThan(PEAK_PRODUCTIVE_AGE.pine);
+  });
+
+  test('high urgency decreases peak age', () => {
+    const sq = { siteQualityIndex: 1.0, harvestUrgency: 10 };
+    const result = computeHealthAdjustedPeakAge('pine', sq);
+    expect(result).toBeLessThan(PEAK_PRODUCTIVE_AGE.pine);
+  });
+
+  test('growing NDVI trend extends peak age', () => {
+    const sq = {
+      siteQualityIndex: 1.0, harvestUrgency: 0,
+      observedBiomassGrowth: { latestNdvi: 0.75, ndviSlope: 0.01, annualGrowthRate: 2 }
+    };
+    const result = computeHealthAdjustedPeakAge('pine', sq);
+    expect(result).toBeGreaterThan(PEAK_PRODUCTIVE_AGE.pine + 10);
+  });
+
+  test('stable high NDVI extends peak age', () => {
+    const sq = {
+      siteQualityIndex: 1.0, harvestUrgency: 0,
+      observedBiomassGrowth: { latestNdvi: 0.80, ndviSlope: 0.0, annualGrowthRate: 1 }
+    };
+    const result = computeHealthAdjustedPeakAge('pine', sq);
+    expect(result).toBeGreaterThan(PEAK_PRODUCTIVE_AGE.pine);
+    expect(result).toBeLessThanOrEqual(PEAK_PRODUCTIVE_AGE.pine + 15);
+  });
+
+  test('low NDVI does not extend peak age', () => {
+    const sq = {
+      siteQualityIndex: 1.0, harvestUrgency: 0,
+      observedBiomassGrowth: { latestNdvi: 0.30, ndviSlope: 0.0, annualGrowthRate: 0.5 }
+    };
+    const result = computeHealthAdjustedPeakAge('pine', sq);
+    expect(result).toBe(PEAK_PRODUCTIVE_AGE.pine);
+  });
+
+  test('below-average SQI reduces peak age', () => {
+    const sq = { siteQualityIndex: 0.7, harvestUrgency: 0 };
+    const result = computeHealthAdjustedPeakAge('pine', sq);
+    expect(result).toBeLessThan(PEAK_PRODUCTIVE_AGE.pine);
+  });
+
+  test('result clamped to [MIN_HARVEST_AGE, 120]', () => {
+    const highUrgency = { siteQualityIndex: 0.6, harvestUrgency: 20 };
+    expect(computeHealthAdjustedPeakAge('pine', highUrgency)).toBeGreaterThanOrEqual(MIN_HARVEST_AGE.pine);
+
+    const superHealthy = {
+      siteQualityIndex: 1.5, harvestUrgency: 0,
+      observedBiomassGrowth: { latestNdvi: 0.85, ndviSlope: 0.02, annualGrowthRate: 10 }
+    };
+    expect(computeHealthAdjustedPeakAge('pine', superHealthy)).toBeLessThanOrEqual(120);
+  });
+});
+
+describe('computeSenescenceFactor', () => {
+  test('returns 1.0 at ages <= peak', () => {
+    expect(computeSenescenceFactor('pine', 60, 80)).toBe(1.0);
+    expect(computeSenescenceFactor('pine', 80, 80)).toBe(1.0);
+    expect(computeSenescenceFactor('birch', 30, 55)).toBe(1.0);
+  });
+
+  test('returns < 1.0 at ages > peak', () => {
+    expect(computeSenescenceFactor('pine', 81, 80)).toBeLessThan(1.0);
+    expect(computeSenescenceFactor('pine', 100, 80)).toBeLessThan(1.0);
+  });
+
+  test('monotonically decreasing past peak', () => {
+    const ages = [85, 90, 95, 100, 110, 120];
+    let prev = 1.0;
+    for (const age of ages) {
+      const factor = computeSenescenceFactor('pine', age, 80);
+      expect(factor).toBeLessThan(prev);
+      prev = factor;
+    }
+  });
+
+  test('reasonable bounds for pine at age 120 (peak 80)', () => {
+    const factor = computeSenescenceFactor('pine', 120, 80);
+    expect(factor).toBeGreaterThan(0.5);
+    expect(factor).toBeLessThan(0.8);
+  });
+
+  test('broadleaves decline faster', () => {
+    const pine = computeSenescenceFactor('pine', 100, 80);
+    const birch = computeSenescenceFactor('birch', 75, 55);
+    // Both 20yr past peak, birch has higher senescence rate
+    expect(birch).toBeLessThan(pine);
+  });
+});
+
+describe('computeQualityDegradation', () => {
+  test('returns 0 at ages <= peak + buffer', () => {
+    expect(computeQualityDegradation('pine', 80, 80)).toBe(0);
+    expect(computeQualityDegradation('pine', 90, 80)).toBe(0);
+  });
+
+  test('returns > 0 past buffer', () => {
+    expect(computeQualityDegradation('pine', 91, 80)).toBeGreaterThan(0);
+    expect(computeQualityDegradation('pine', 100, 80)).toBeGreaterThan(0);
+  });
+
+  test('monotonically increasing past buffer', () => {
+    const ages = [95, 100, 105, 110, 120];
+    let prev = 0;
+    for (const age of ages) {
+      const deg = computeQualityDegradation('pine', age, 80);
+      expect(deg).toBeGreaterThan(prev);
+      prev = deg;
+    }
+  });
+
+  test('capped at 0.6', () => {
+    const deg = computeQualityDegradation('pine', 200, 80);
+    expect(deg).toBe(0.6);
+  });
+});
+
+describe('estimateTimberValue with quality degradation', () => {
+  test('quality degradation reduces sawlog fraction', () => {
+    const normal = estimateTimberValue(300, 'pine', 70, 5);
+    const degraded = estimateTimberValue(300, 'pine', 70, 5, { qualityDegradation: 0.3 });
+    expect(degraded.sawlogFraction).toBeLessThan(normal.sawlogFraction);
+    expect(degraded.totalValue).toBeLessThan(normal.totalValue);
+  });
+
+  test('quality degradation does not affect aspen', () => {
+    const normal = estimateTimberValue(300, 'aspen', 70, 5);
+    const degraded = estimateTimberValue(300, 'aspen', 70, 5, { qualityDegradation: 0.3 });
+    expect(degraded.totalValue).toBeCloseTo(normal.totalValue, 1);
+  });
+
+  test('sawlog fraction has minimum floor of 0.1', () => {
+    const result = estimateTimberValue(300, 'pine', 70, 5, { qualityDegradation: 0.95 });
+    expect(result.sawlogFraction).toBeGreaterThanOrEqual(0.1);
+  });
+});
+
+describe('projectForestValue senescence', () => {
+  test('value peaks and then declines for no-harvest scenario', () => {
+    const result = projectForestValue('pine', 5, 120);
+    let peakAge = 0, peakValue = 0;
+    result.forEach(p => {
+      if (p.timberValue > peakValue) {
+        peakValue = p.timberValue;
+        peakAge = p.age;
+      }
+    });
+    expect(peakAge).toBeGreaterThanOrEqual(65);
+    expect(peakAge).toBeLessThanOrEqual(95);
+    expect(result[120].timberValue).toBeLessThan(peakValue);
+  });
+
+  test('chart peak aligns with optimal harvest for pine', () => {
+    const values = projectForestValue('pine', 5, 140);
+    const optimal = findOptimalHarvest('pine', 5);
+    let chartPeakAge = 0, chartPeakValue = 0;
+    values.forEach(p => {
+      if (p.timberValue > chartPeakValue) {
+        chartPeakValue = p.timberValue;
+        chartPeakAge = p.age;
+      }
+    });
+    // Chart peak is undiscounted; Faustmann optimal accounts for time-value of money.
+    // The optimal harvest is economically before the raw value peak.
+    expect(chartPeakAge).toBeGreaterThanOrEqual(optimal.optimalAge);
+    expect(chartPeakAge - optimal.optimalAge).toBeLessThanOrEqual(25);
+  });
+
+  test('healthy forest peaks later than base', () => {
+    const base = projectForestValue('pine', 5, 120);
+    const healthy = projectForestValue('pine', 5, 120, {
+      currentAge: 40,
+      siteQuality: {
+        siteQualityIndex: 1.2, harvestUrgency: 0,
+        observedBiomassGrowth: { latestNdvi: 0.80, ndviSlope: 0.01, annualGrowthRate: 5, latestNdviBiomass: 300 }
+      }
+    });
+    let basePeak = 0, healthyPeak = 0;
+    base.forEach(p => { if (p.timberValue > (base[basePeak]?.timberValue || 0)) basePeak = p.age; });
+    healthy.forEach(p => { if (p.timberValue > (healthy[healthyPeak]?.timberValue || 0)) healthyPeak = p.age; });
+    expect(healthyPeak).toBeGreaterThanOrEqual(basePeak);
   });
 });

@@ -5,7 +5,9 @@ import {
   estimateTimberValue,
   BASIC_DENSITY,
   TIMBER_PRICES,
-  FORESTRY_DISCOUNT_RATE
+  FORESTRY_DISCOUNT_RATE,
+  PEAK_PRODUCTIVE_AGE,
+  computeSenescenceFactor
 } from './carbonCalculation';
 import { forestParams, estimateBiomass } from './dataProcessing';
 
@@ -50,10 +52,12 @@ export function calculatePriceRange(biomassPerHa, forestType, forestAge, areaHec
   let sawlogFraction;
   if (forestAge <= 30) {
     sawlogFraction = 0.1;
-  } else if (forestAge >= 60) {
-    sawlogFraction = 0.7;
-  } else {
+  } else if (forestAge <= 60) {
     sawlogFraction = 0.1 + (0.6 * (forestAge - 30) / 30);
+  } else if (forestAge <= 100) {
+    sawlogFraction = 0.7 + (0.15 * (forestAge - 60) / 40);
+  } else {
+    sawlogFraction = 0.85;
   }
   if (type === 'aspen') sawlogFraction = 0;
 
@@ -109,7 +113,9 @@ export function analyzeHarvestDelay(forestType, currentAge, areaHectares, delayY
 
   const projections = delayYears.map(years => {
     const futureAge = currentAge + years;
-    const futureBiomass = estimateBiomass(params.ndviSaturation, type, years, currentAge) * biomassScale;
+    const baseFutureBiomass = estimateBiomass(params.ndviSaturation, type, years, currentAge) * biomassScale;
+    const senescence = computeSenescenceFactor(type, futureAge, PEAK_PRODUCTIVE_AGE[type] || 80);
+    const futureBiomass = baseFutureBiomass * senescence;
     const futureRange = calculatePriceRange(futureBiomass, type, futureAge, areaHectares);
     const discountFactor = Math.pow(1 + discountRate, years);
 

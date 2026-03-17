@@ -57,8 +57,92 @@ export const REGENERATION_COST = {
 // NDVI plateaus after canopy closure (~age 25-30) but stem diameter growth continues
 export const MIN_HEALTHY_GROWTH = { pine: 3.0, fir: 3.5, birch: 2.5, aspen: 2.0 };
 
+// Peak productive age: age where timber value growth is overtaken by
+// senescence (mortality, rot, wind damage, quality degradation).
+// Beyond this age, standing timber value begins to decline.
+export const PEAK_PRODUCTIVE_AGE = { pine: 80, fir: 75, birch: 55, aspen: 40 };
+
+// Annual senescence rate past peak age. Boreal conifers decline slowly; broadleaves faster.
+export const SENESCENCE_RATE = { pine: 0.008, fir: 0.010, birch: 0.012, aspen: 0.015 };
+
 // Real discount rate for forestry NPV calculations
 export const FORESTRY_DISCOUNT_RATE = 0.03;
+
+// Compute health-adjusted peak productive age from site quality data.
+// Healthy, thriving forests peak later; stressed forests peak earlier.
+export function computeHealthAdjustedPeakAge(forestType, siteQuality) {
+  const type = (forestType && forestParams[forestType]) ? forestType : 'pine';
+  const basePeak = PEAK_PRODUCTIVE_AGE[type] || PEAK_PRODUCTIVE_AGE.pine;
+  const minAge = MIN_HARVEST_AGE[type] || MIN_HARVEST_AGE.pine;
+
+  if (!siteQuality) return basePeak;
+
+  const sqi = siteQuality.siteQualityIndex || 1.0;
+  const urgency = siteQuality.harvestUrgency || 0;
+  const obs = siteQuality.observedBiomassGrowth;
+
+  let adjustment = 0;
+
+  // High SQI + low urgency: excellent sites sustain productivity longer
+  if (sqi > 1.05 && urgency <= 5) {
+    adjustment += Math.min(15, (sqi - 1.0) * 30);
+  }
+
+  // NDVI health: high NDVI with non-declining trend indicates continued
+  // biological productivity. Stem diameter growth continues even after
+  // NDVI saturates at canopy closure.
+  if (obs && obs.latestNdvi != null && urgency <= 5) {
+    const ndviSat = (forestParams[type] || forestParams.pine).ndviSaturation;
+    const ndviRatio = obs.latestNdvi / ndviSat;
+    const ndviTrend = obs.ndviSlope || 0;
+    if (ndviRatio >= 0.7 && ndviTrend >= -0.005) {
+      const healthLevel = Math.max(0, Math.min(1, (ndviRatio - 0.5) / 0.3));
+      if (ndviTrend >= 0.005) {
+        adjustment += Math.round(healthLevel * 15); // growing NDVI
+      } else {
+        adjustment += Math.round(healthLevel * 10); // stable NDVI
+      }
+    }
+  }
+
+  // Strong observed growth supports later peak
+  const minGrowth = MIN_HEALTHY_GROWTH[type] || MIN_HEALTHY_GROWTH.pine;
+  if (obs && obs.annualGrowthRate > minGrowth && urgency <= 5) {
+    adjustment += Math.min(5, (obs.annualGrowthRate - minGrowth) * 0.5);
+  }
+
+  // Health urgency pulls peak earlier
+  if (urgency > 0) {
+    adjustment -= Math.min(20, urgency * 2);
+  }
+
+  // Below-average SQI: poor site peaks earlier
+  if (sqi < 0.9) {
+    adjustment -= Math.min(10, (0.9 - sqi) * 30);
+  }
+
+  return Math.max(minAge, Math.min(120, Math.round(basePeak + adjustment)));
+}
+
+// Senescence factor: exponential decline past peak productive age.
+// Returns 1.0 at/before peak, declining after with quadratic acceleration.
+export function computeSenescenceFactor(forestType, age, peakAge) {
+  if (age <= peakAge) return 1.0;
+  const type = forestType || 'pine';
+  const rate = SENESCENCE_RATE[type] || SENESCENCE_RATE.pine;
+  const yearsPast = age - peakAge;
+  return Math.exp(-rate * yearsPast * (1 + yearsPast * 0.01));
+}
+
+// Quality degradation for over-mature timber (rot, heart decay, defects).
+// Returns 0 before peak+10yr buffer, then increases up to 0.6 cap.
+export function computeQualityDegradation(forestType, age, peakAge) {
+  const buffer = 10;
+  const declineStart = peakAge + buffer;
+  if (age <= declineStart) return 0;
+  const yearsPast = age - declineStart;
+  return Math.min(0.6, 0.012 * yearsPast * (1 + yearsPast * 0.005));
+}
 
 export function biomassToCarbon(aboveGroundBiomass, forestType, options = {}) {
   const type = forestType || 'pine';
@@ -237,6 +321,9 @@ export function projectForestValue(forestType, areaHectares, projectionYears = 1
     }
   }
 
+  // Health-adjusted peak age for senescence modeling
+  const peakAge = computeHealthAdjustedPeakAge(type, siteQuality);
+
   for (let age = 0; age <= projectionYears; age++) {
     let biomass;
 
@@ -254,7 +341,14 @@ export function projectForestValue(forestType, areaHectares, projectionYears = 1
       biomass = estimateBiomass(params.ndviSaturation, type, age, 0) * biomassCorrectionFactor;
     }
 
-    const timber = estimateTimberValue(biomass, type, age, areaHectares);
+    // Senescence: past peak productive age, biomass declines
+    const senescence = computeSenescenceFactor(type, age, peakAge);
+    biomass *= senescence;
+
+    // Quality degradation reduces sawlog fraction for over-mature timber
+    const qualityDeg = computeQualityDegradation(type, age, peakAge);
+
+    const timber = estimateTimberValue(biomass, type, age, areaHectares, { qualityDegradation: qualityDeg });
     points.push({
       age,
       biomass,
@@ -274,7 +368,7 @@ export function findOptimalHarvest(forestType, areaHectares, options = {}) {
   const regenCost = regenCostPerHa * areaHectares;
   const minAge = MIN_HARVEST_AGE[type] || MIN_HARVEST_AGE.pine;
 
-  const values = projectForestValue(type, areaHectares, 120);
+  const values = projectForestValue(type, areaHectares, 140);
 
   // Faustmann Land Expectation Value: LEV = (V(T) - C) / (exp(r*T) - 1)
   // Maximize LEV over ages >= species minimum harvest age
@@ -369,6 +463,16 @@ export function findOptimalHarvestYear(forestType, currentAge, currentBiomass, a
         effectiveDiscountRate *= (1 - reductionFactor);
       }
     }
+    // NDVI health bonus: forests with high NDVI that is not declining have
+    // lower biological risk and continued hidden value appreciation (stem growth).
+    if (observedGrowth && observedGrowth.latestNdvi != null) {
+      const ndviRatio = observedGrowth.latestNdvi / params.ndviSaturation;
+      const ndviTrend = observedGrowth.ndviSlope || 0;
+      if (ndviRatio >= 0.7 && ndviTrend >= -0.005) {
+        const healthLevel = Math.max(0, Math.min(1, (ndviRatio - 0.5) / 0.3));
+        effectiveDiscountRate *= (1 - healthLevel * 0.3);
+      }
+    }
   }
 
   // Projected timber value at a given age
@@ -385,43 +489,47 @@ export function findOptimalHarvestYear(forestType, currentAge, currentBiomass, a
     return max + softOvershoot;
   };
 
+  // Health-adjusted peak age for senescence modeling
+  const peakAge = computeHealthAdjustedPeakAge(type, sq);
+
   const valueAt = (age, yearsFromCurrent) => {
     const yrs = yearsFromCurrent || 0;
+    let biomass;
 
     if (effectiveGrowthRate > 0 && yrs > 0 && harvestUrgency <= 5) {
       // Project from NDVI-based biomass (age-independent) using effective growth rate
-      // This avoids the age-model inflation that makes forests look near-maxed
       // Half-life dampening — growth rate halves every 20 years
       const integratedGrowth = effectiveGrowthRate * (20 / Math.LN2) * (1 - Math.pow(0.5, yrs / 20));
       const projectedBiomass = projectionBase + integratedGrowth;
-      // Soft cap at species maximum (allows slight overshoot)
-      const biomass = softCap(projectedBiomass, params.maxBiomass);
-      return estimateTimberValue(biomass, type, age, areaHectares).totalValue;
-    }
-
-    if (observedGrowthRate < 0 && yrs > 0) {
+      biomass = softCap(projectedBiomass, params.maxBiomass);
+    } else if (observedGrowthRate < 0 && yrs > 0) {
       // Declining forest: project loss forward
-      const integratedLoss = observedGrowthRate * yrs; // negative
-      const projectedBiomass = Math.max(params.youngBiomass, projectionBase + integratedLoss);
-      return estimateTimberValue(projectedBiomass, type, age, areaHectares).totalValue;
+      biomass = Math.max(params.youngBiomass, projectionBase + observedGrowthRate * yrs);
+    } else {
+      // Fallback: theoretical curve with scale factor
+      biomass = estimateBiomass(params.ndviSaturation, type, 0, age) * adjustedScaleFactor;
     }
 
-    // Fallback: theoretical curve with scale factor
-    const biomass = estimateBiomass(params.ndviSaturation, type, 0, age) * adjustedScaleFactor;
-    return estimateTimberValue(biomass, type, age, areaHectares).totalValue;
+    // Apply senescence past peak productive age
+    const senescence = computeSenescenceFactor(type, age, peakAge);
+    biomass *= senescence;
+
+    // Apply quality degradation for over-mature timber
+    const qualityDeg = computeQualityDegradation(type, age, peakAge);
+
+    return estimateTimberValue(biomass, type, age, areaHectares, { qualityDegradation: qualityDeg }).totalValue;
   };
 
   const currentValue = estimateTimberValue(currentBiomass, type, currentAge, areaHectares).totalValue;
 
   // Two-generation NPV: find first-harvest age T that maximizes
   // NPV(T) = [V_scaled(T) - C] / (1+r)^(T-now) + [V(R) - C] / (1+r)^(T-now+R)
-  // When observed growth is strong, also account for the opportunity cost of replanting:
-  // each year you delay, you earn real growth on the standing timber vs. starting a new
-  // rotation from zero. The "marginal value of waiting" must exceed the discount rate.
-  // Expand search range earlier when urgency is present
-  const adjustedStartAge = Math.max(minAge, Math.max(minAge, currentAge) - Math.min(harvestUrgency, Math.max(minAge, currentAge) - minAge));
-  const startAge = Math.max(minAge, adjustedStartAge);
-  const maxCandidateAge = currentAge + 40;
+  // Health-based minimum harvest age: healthy forests should not be harvested
+  // prematurely. The peak age drives a biological minimum (peakAge - 15yr).
+  const healthAdjustedMinAge = harvestUrgency <= 5 ? Math.max(minAge, peakAge - 15) : minAge;
+  const adjustedStartAge = Math.max(healthAdjustedMinAge, Math.max(healthAdjustedMinAge, currentAge) - Math.min(harvestUrgency, Math.max(healthAdjustedMinAge, currentAge) - healthAdjustedMinAge));
+  const startAge = Math.max(healthAdjustedMinAge, adjustedStartAge);
+  const maxCandidateAge = Math.max(currentAge + 40, peakAge + 20);
   let bestT = startAge;
   let bestNPV = -Infinity;
 
@@ -459,24 +567,6 @@ export function findOptimalHarvestYear(forestType, currentAge, currentBiomass, a
       }
     }
     bestT = T;
-  }
-
-  // NDVI health delay: if NDVI is high and not declining, enforce a minimum wait
-  // regardless of what NPV says. Biological criterion: healthy forests should not
-  // be harvested just because NDVI-measured growth is near zero (stem growth continues).
-  if (observedGrowth && observedGrowth.latestNdvi != null) {
-    const ndviRatio = observedGrowth.latestNdvi / params.ndviSaturation;
-    const ndviTrend = observedGrowth.ndviSlope || 0;
-    // 0 at 50% saturation, 1 at 80%+
-    const ndviHealthLevel = Math.max(0, Math.min(1, (ndviRatio - 0.5) / 0.3));
-
-    let healthDelay = 0;
-    if (ndviTrend >= 0.005)       healthDelay = Math.round(ndviHealthLevel * 20); // growing
-    else if (ndviTrend >= -0.005) healthDelay = Math.round(ndviHealthLevel * 15); // stable
-    else if (ndviTrend >= -0.01)  healthDelay = Math.round(ndviHealthLevel * 8);  // slight decline
-    // else: significant decline → no delay
-
-    if (healthDelay > 0) bestT = Math.max(bestT, Math.max(minAge, currentAge + healthDelay));
   }
 
   const harvestYear = bestT;
@@ -554,8 +644,12 @@ export function projectHarvestCycle(forestType, areaHectares, totalYears = 100, 
       cumulativeHarvestIncome += harvestTimber.totalValue;
     }
 
-    const biomass = estimateBiomass(params.ndviSaturation, type, ageInCycle, 0) * sf;
-    const timber = estimateTimberValue(biomass, type, ageInCycle, areaHectares);
+    const baseBiomass = estimateBiomass(params.ndviSaturation, type, ageInCycle, 0) * sf;
+    const basePeak = PEAK_PRODUCTIVE_AGE[type] || PEAK_PRODUCTIVE_AGE.pine;
+    const senescence = computeSenescenceFactor(type, ageInCycle, basePeak);
+    const qualityDeg = computeQualityDegradation(type, ageInCycle, basePeak);
+    const biomass = baseBiomass * senescence;
+    const timber = estimateTimberValue(biomass, type, ageInCycle, areaHectares, { qualityDegradation: qualityDeg });
 
     points.push({
       year,
@@ -579,7 +673,7 @@ export function estimateCarbonCreditValue(co2eTons, creditPricePerTon) {
   };
 }
 
-export function estimateTimberValue(biomassPerHa, forestType, forestAge, areaHectares) {
+export function estimateTimberValue(biomassPerHa, forestType, forestAge, areaHectares, options = {}) {
   const type = forestType || 'pine';
   const density = BASIC_DENSITY[type] || BASIC_DENSITY.pine;
   const prices = TIMBER_PRICES[type] || TIMBER_PRICES.pine;
@@ -598,6 +692,11 @@ export function estimateTimberValue(biomassPerHa, forestType, forestAge, areaHec
     sawlogFraction = 0.7 + (0.15 * (forestAge - 60) / 40);
   } else {
     sawlogFraction = 0.85;
+  }
+
+  // Quality degradation for over-mature stands (only in projections)
+  if (options.qualityDegradation > 0 && type !== 'aspen') {
+    sawlogFraction = Math.max(0.1, sawlogFraction * (1 - options.qualityDegradation));
   }
 
   // Aspen has no sawlog market

@@ -1,7 +1,7 @@
 // Forest succession & generational transfer planner
 // Finnish inheritance tax and forest estate valuation
 
-import { estimateTimberValue, estimateCarbonCreditValue, biomassToCarbon, FORESTRY_DISCOUNT_RATE, findOptimalHarvestYear } from './carbonCalculation';
+import { estimateTimberValue, estimateCarbonCreditValue, biomassToCarbon, FORESTRY_DISCOUNT_RATE, findOptimalHarvestYear, PEAK_PRODUCTIVE_AGE, computeSenescenceFactor, computeQualityDegradation } from './carbonCalculation';
 import { forestParams, estimateBiomass } from './dataProcessing';
 
 // Finnish inheritance tax Class I (children, spouse) progressive rates
@@ -76,18 +76,21 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
   const valueMode = options.valueMode || 'timber'; // 'timber' or 'carbon'
 
   // Valuation helper — returns € value for a given biomass
-  const valuate = (biomass, age, area) => {
+  const basePeak = PEAK_PRODUCTIVE_AGE[type] || PEAK_PRODUCTIVE_AGE.pine;
+  const valuate = (biomass, age, area, qualityDeg) => {
     if (valueMode === 'carbon') {
       const carbon = biomassToCarbon(biomass, type);
       return estimateCarbonCreditValue(carbon.co2eTons * area).totalValue;
     }
-    return estimateTimberValue(biomass, type, age, area).totalValue;
+    return estimateTimberValue(biomass, type, age, area, qualityDeg ? { qualityDegradation: qualityDeg } : {}).totalValue;
   };
 
   // Current value — use observed biomass when available, theoretical as fallback
   const theoreticalBiomass = estimateBiomass(params.ndviSaturation, type, 0, forestAge);
   const currentBiomass = options.currentBiomass || theoreticalBiomass;
-  const biomassScale = theoreticalBiomass > 0 ? currentBiomass / theoreticalBiomass : 1;
+  const biomassScale = theoreticalBiomass > 0
+    ? Math.max(0.5, Math.min(1.5, currentBiomass / theoreticalBiomass))
+    : 1;
   const currentValue = valuate(currentBiomass, forestAge, areaHectares);
 
   const active = [];
@@ -106,8 +109,11 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
     const age = forestAge + y;
 
     // Hold scenario: forest grows, no harvest (scaled to observed biomass)
-    const holdBiomass = estimateBiomass(params.ndviSaturation, type, y, forestAge) * biomassScale;
-    hold.push({ year: y, age, value: valuate(holdBiomass, age, areaHectares) });
+    const holdBaseBiomass = estimateBiomass(params.ndviSaturation, type, y, forestAge) * biomassScale;
+    const holdSenescence = computeSenescenceFactor(type, age, basePeak);
+    const holdQualityDeg = computeQualityDegradation(type, age, basePeak);
+    const holdBiomass = holdBaseBiomass * holdSenescence;
+    hold.push({ year: y, age, value: valuate(holdBiomass, age, areaHectares, holdQualityDeg) });
 
     // Active scenario: first harvest at recommended age, then every rotationAge
     // Before any harvest occurs, the forest grows normally from its current state
@@ -134,9 +140,9 @@ export function projectManagementScenarios(forestType, forestAge, areaHectares, 
       activeEffectiveAge = 0;
     } else {
       // Regrowth after harvest
-      const yearsSinceLastHarvest = firstHarvestYear >= 0
-        ? (y - firstHarvestYear) % rotationAge
-        : y % rotationAge;
+      const yearsSinceLastHarvest = rotationAge > 0
+        ? ((firstHarvestYear >= 0 ? (y - firstHarvestYear) : y) % rotationAge)
+        : (y - firstHarvestYear);
       activeEffectiveAge = yearsSinceLastHarvest;
       activeBiomass = estimateBiomass(params.ndviSaturation, type, 0, yearsSinceLastHarvest);
     }
