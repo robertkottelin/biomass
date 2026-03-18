@@ -360,7 +360,7 @@ const ForestBiomassApp = () => {
       const loadedStats = data.analysis?.stats_data || null;
       setVegetationStats(loadedStats);
 
-      if (data.analysis && data.analysis.biomass_data) {
+      if (data.analysis?.biomass_data?.length > 0) {
         const finalResults = data.analysis.biomass_data;
         setBiomassData(finalResults);
 
@@ -574,8 +574,8 @@ const ForestBiomassApp = () => {
               ndviValues.push(ndviVal);
               const ndmiVal = ndmiBand ? ndmiBand[i] : NaN;
               const ndreVal = ndreBand ? ndreBand[i] : NaN;
-              ndmiValues.push(!isNaN(ndmiVal) && ndmiVal >= -1.0 && ndmiVal <= 1.0 ? ndmiVal : 0);
-              ndreValues.push(!isNaN(ndreVal) && ndreVal >= -1.0 && ndreVal <= 1.0 ? ndreVal : 0);
+              ndmiValues.push(!isNaN(ndmiVal) && ndmiVal >= -1.0 && ndmiVal <= 1.0 ? ndmiVal : NaN);
+              ndreValues.push(!isNaN(ndreVal) && ndreVal >= -1.0 && ndreVal <= 1.0 ? ndreVal : NaN);
             }
           }
 
@@ -594,8 +594,10 @@ const ForestBiomassApp = () => {
       const mean = ndviValues.reduce((a, b) => a + b, 0) / ndviValues.length;
       const min = Math.min(...ndviValues);
       const max = Math.max(...ndviValues);
-      const ndmiMean = ndmiValues.length > 0 ? ndmiValues.reduce((a, b) => a + b, 0) / ndmiValues.length : 0;
-      const ndreMean = ndreValues.length > 0 ? ndreValues.reduce((a, b) => a + b, 0) / ndreValues.length : 0;
+      const validNdmi = ndmiValues.filter(v => !isNaN(v));
+      const validNdre = ndreValues.filter(v => !isNaN(v));
+      const ndmiMean = validNdmi.length > 0 ? validNdmi.reduce((a, b) => a + b, 0) / validNdmi.length : 0;
+      const ndreMean = validNdre.length > 0 ? validNdre.reduce((a, b) => a + b, 0) / validNdre.length : 0;
 
       // Land cover analysis
       const vegetationPixels = ndviValues.filter(v => v > 0.3).length;
@@ -635,6 +637,7 @@ const ForestBiomassApp = () => {
 
       // Extract unique dates from features
       const dates = new Set();
+      if (!Array.isArray(data.features)) return [];
       data.features.forEach(feature => {
         if (feature.properties && feature.properties.datetime) {
           const date = new Date(feature.properties.datetime);
@@ -711,7 +714,8 @@ const ForestBiomassApp = () => {
       const healthResult = analyzeForestHealth(finalResults, demo.forest.type, demo.forest.age);
       setHealthEstimate(healthResult);
 
-      const bioEst = estimateBiodiversity(finalResults, treeEst, healthResult, demo.forest.type, demo.forest.age, demo.forest.area_hectares, vegetationStats);
+      setVegetationStats(null);
+      const bioEst = estimateBiodiversity(finalResults, treeEst, healthResult, demo.forest.type, demo.forest.age, demo.forest.area_hectares, null);
       setBiodiversityEstimate(bioEst);
       setProcessingStatus('');
     } catch (err) {
@@ -943,7 +947,7 @@ const ForestBiomassApp = () => {
         api.put(`/api/forests/${loadedForestId}/analyses`, {
           biomass_data_json: finalResults,
           stats_data_json: vegetationStats,
-        }).catch(() => {}); // silent — best effort
+        }).catch((err) => { console.warn('Auto-save failed:', err.message || err); });
       }
 
       // Vegetation coverage analysis
@@ -1011,7 +1015,7 @@ const ForestBiomassApp = () => {
         api.put(`/api/forests/${loadedForestId}/analyses`, {
           biomass_data_json: biomassData,
           stats_data_json: data,
-        }).catch(() => {}); // silent — best effort
+        }).catch((err) => { console.warn('Auto-save failed:', err.message || err); });
       }
     } catch (err) {
       setError(`Statistics error: ${err.message}`);
@@ -1071,6 +1075,7 @@ const ForestBiomassApp = () => {
 
       setBiomassData([]);
       setAgeEstimate(null);
+      setVegetationStats(null);
     }
   };
 
@@ -3304,6 +3309,10 @@ const ForestBiomassApp = () => {
           <strong>Author:</strong> <a href="https://x.com/robertkottelin" target="_blank" rel="noopener noreferrer">@robertkottelin</a>
           {' | '}
           <strong>Source code:</strong> <a href="https://github.com/robertkottelin/biomass" target="_blank" rel="noopener noreferrer">Github</a>
+        </p>
+        <p style={{ fontSize: '12px', color: colors.gray500, marginTop: '4px' }}>
+          Feature ideas, bugs, or issues? Reach out at{' '}
+          <a href="mailto:robert.kottelin@gmail.com">robert.kottelin@gmail.com</a>
         </p>
       </div>
 

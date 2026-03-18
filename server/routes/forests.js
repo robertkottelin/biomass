@@ -9,6 +9,16 @@ const logger = require('../lib/logger');
 const db = knex(knexConfig);
 const router = express.Router();
 
+function safeParse(jsonString) {
+  if (!jsonString) return null;
+  try {
+    return JSON.parse(jsonString);
+  } catch (e) {
+    logger.warn('Corrupt JSON in database', { error: e.message, preview: String(jsonString).substring(0, 100) });
+    return null;
+  }
+}
+
 // GET /api/forests/demo/sample — no auth required
 router.get('/demo/sample', (req, res, next) => {
   try {
@@ -103,15 +113,9 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       analysis: latestAnalysis
         ? {
             id: latestAnalysis.id,
-            ndvi_data: latestAnalysis.ndvi_data_json
-              ? JSON.parse(latestAnalysis.ndvi_data_json)
-              : null,
-            biomass_data: latestAnalysis.biomass_data_json
-              ? JSON.parse(latestAnalysis.biomass_data_json)
-              : null,
-            stats_data: latestAnalysis.stats_data_json
-              ? JSON.parse(latestAnalysis.stats_data_json)
-              : null,
+            ndvi_data: safeParse(latestAnalysis.ndvi_data_json),
+            biomass_data: safeParse(latestAnalysis.biomass_data_json),
+            stats_data: safeParse(latestAnalysis.stats_data_json),
             created_at: latestAnalysis.created_at,
           }
         : null,

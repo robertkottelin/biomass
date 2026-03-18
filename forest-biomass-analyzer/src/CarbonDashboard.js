@@ -53,7 +53,8 @@ const InfoButton = ({ id, showInfo, setShowInfo, children }) => (
 const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, showInfo, setShowInfo, healthEstimate, vegetationStats }) => {
   const timberValue = useMemo(() => {
     if (!biomassData || biomassData.length === 0) return null;
-    const latestBiomass = biomassData[biomassData.length - 1].biomass;
+    const latestBiomass = biomassData[biomassData.length - 1].biomassRollingAvg
+      ?? biomassData[biomassData.length - 1].biomass;
     return estimateTimberValue(latestBiomass, forestType, forestAge, areaHectares);
   }, [biomassData, forestType, forestAge, areaHectares]);
 
@@ -86,13 +87,15 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
 
   const carbonStock = useMemo(() => {
     if (!biomassData || biomassData.length === 0) return null;
-    const latestBiomass = biomassData[biomassData.length - 1].biomass;
+    const latestBiomass = biomassData[biomassData.length - 1].biomassRollingAvg
+      ?? biomassData[biomassData.length - 1].biomass;
     return biomassToCarbon(latestBiomass, forestType);
   }, [biomassData, forestType]);
 
   const carbonProjection = useMemo(() => {
     if (!biomassData || biomassData.length === 0) return null;
-    const latestBiomass = biomassData[biomassData.length - 1].biomass;
+    const latestBiomass = biomassData[biomassData.length - 1].biomassRollingAvg
+      ?? biomassData[biomassData.length - 1].biomass;
     const points = projectCarbonStock(latestBiomass, forestType, forestAge, areaHectares, 30);
     const annualSeqRate = points.length > 1 ? points[1].annualSequestration : 0;
     return { points, annualSeqRate };
@@ -105,7 +108,8 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
 
   const scenarioData = useMemo(() => {
     if (!biomassData || biomassData.length === 0) return null;
-    const latestBiomass = biomassData[biomassData.length - 1].biomass;
+    const latestBiomass = biomassData[biomassData.length - 1].biomassRollingAvg
+      ?? biomassData[biomassData.length - 1].biomass;
     return compareScenarios(latestBiomass, forestType, forestAge, areaHectares);
   }, [biomassData, forestType, forestAge, areaHectares]);
 
@@ -113,9 +117,9 @@ const CarbonDashboard = ({ biomassData, forestType, forestAge, areaHectares, sho
     if (!scenarioData) return [];
     return scenarioData.continueGrowing.data.map((d, i) => ({
       year: d.year,
-      continueGrowing: parseFloat(d.co2ePerHa.toFixed(1)),
-      harvestReplant: parseFloat(scenarioData.harvestReplant.data[i].co2ePerHa.toFixed(1)),
-      optimal: parseFloat(scenarioData.optimal.data[i].co2ePerHa.toFixed(1))
+      continueGrowing: Math.round(d.co2ePerHa * 10) / 10,
+      harvestReplant: Math.round(scenarioData.harvestReplant.data[i].co2ePerHa * 10) / 10,
+      optimal: Math.round(scenarioData.optimal.data[i].co2ePerHa * 10) / 10
     }));
   }, [scenarioData]);
 

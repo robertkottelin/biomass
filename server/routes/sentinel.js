@@ -9,6 +9,7 @@ const router = express.Router();
 // Token cache
 let cachedToken = null;
 let tokenExpiresAt = 0;
+let refreshPromise = null;
 
 const TOKEN_URL =
   'https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token';
@@ -24,36 +25,49 @@ async function getAccessToken() {
     return cachedToken;
   }
 
-  const clientId = process.env.SENTINEL_CLIENT_ID;
-  const clientSecret = process.env.SENTINEL_CLIENT_SECRET;
-
-  if (!clientId || !clientSecret) {
-    throw new Error('Sentinel Hub credentials not configured');
+  // If a refresh is already in flight, wait for it
+  if (refreshPromise) {
+    return refreshPromise;
   }
 
-  const params = new URLSearchParams();
-  params.append('grant_type', 'client_credentials');
-  params.append('client_id', clientId);
-  params.append('client_secret', clientSecret);
+  refreshPromise = (async () => {
+    try {
+      const clientId = process.env.SENTINEL_CLIENT_ID;
+      const clientSecret = process.env.SENTINEL_CLIENT_SECRET;
 
-  const response = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString(),
-  });
+      if (!clientId || !clientSecret) {
+        throw new Error('Sentinel Hub credentials not configured');
+      }
 
-  if (!response.ok) {
-    const text = await response.text();
-    logger.error('Failed to obtain Sentinel token', { status: response.status, body: text });
-    throw new Error(`Failed to obtain Sentinel token: ${response.status} ${text}`);
-  }
+      const params = new URLSearchParams();
+      params.append('grant_type', 'client_credentials');
+      params.append('client_id', clientId);
+      params.append('client_secret', clientSecret);
 
-  const data = await response.json();
-  cachedToken = data.access_token;
-  tokenExpiresAt = now + data.expires_in * 1000;
-  logger.info('Sentinel token obtained', { expiresIn: data.expires_in });
+      const response = await fetch(TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      });
 
-  return cachedToken;
+      if (!response.ok) {
+        const text = await response.text();
+        logger.error('Failed to obtain Sentinel token', { status: response.status, body: text });
+        throw new Error(`Failed to obtain Sentinel token: ${response.status} ${text}`);
+      }
+
+      const data = await response.json();
+      cachedToken = data.access_token;
+      tokenExpiresAt = Date.now() + data.expires_in * 1000;
+      logger.info('Sentinel token obtained', { expiresIn: data.expires_in });
+
+      return cachedToken;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
 }
 
 // All sentinel routes require auth and pro/business plan
@@ -189,12 +203,12 @@ function setup() {
 
 function evaluatePixel(sample) {
   let scl = sample.SCL;
-  if (scl === 3 || scl === 8 || scl === 9 || scl === 10) {
+  if (scl === 3 || scl === 8 || scl === 9 || scl === 10 || scl === 11) {
     return { ndvi: [NaN], ndmi: [NaN], ndre: [NaN], dataMask: [0] };
   }
-  let ndvi = (sample.B08 - sample.B04) / (sample.B08 + sample.B04);
-  let ndmi = (sample.B08 - sample.B11) / (sample.B08 + sample.B11);
-  let ndre = (sample.B08 - sample.B05) / (sample.B08 + sample.B05);
+  let ndvi = (sample.B08 - sample.B04) / (sample.B08 + sample.B04 + 0.0001);
+  let ndmi = (sample.B08 - sample.B11) / (sample.B08 + sample.B11 + 0.0001);
+  let ndre = (sample.B08 - sample.B05) / (sample.B08 + sample.B05 + 0.0001);
   return { ndvi: [ndvi], ndmi: [ndmi], ndre: [ndre], dataMask: [1] };
 }`;
 
@@ -215,7 +229,7 @@ function evaluatePixel(sample) {
           dataFilter: {
             timeRange: { from: `${dateFrom}T00:00:00Z`, to: `${dateTo}T23:59:59Z` },
             mosaickingOrder: 'leastCC',
-            maxCloudCoverage: 50,
+            maxCloudCoverage: 30,
           },
         }],
       },
@@ -304,7 +318,7 @@ function setup() {
   return { input: ["B04", "B03", "B02", "SCL"], output: { bands: 4 } };
 }
 function evaluatePixel(s) {
-  if (s.SCL === 3 || s.SCL === 8 || s.SCL === 9 || s.SCL === 10) return [0,0,0,0];
+  if (s.SCL === 3 || s.SCL === 8 || s.SCL === 9 || s.SCL === 10 || s.SCL === 11) return [0,0,0,0];
   return [s.B04*3.5, s.B03*3.5, s.B02*3.5, 1];
 }`,
       ndviColored: `
@@ -313,8 +327,8 @@ function setup() {
   return { input: ["B04", "B08", "SCL"], output: { bands: 4 } };
 }
 function evaluatePixel(s) {
-  if (s.SCL === 3 || s.SCL === 8 || s.SCL === 9 || s.SCL === 10) return [0,0,0,0];
-  let ndvi = (s.B08 - s.B04) / (s.B08 + s.B04);
+  if (s.SCL === 3 || s.SCL === 8 || s.SCL === 9 || s.SCL === 10 || s.SCL === 11) return [0,0,0,0];
+  let ndvi = (s.B08 - s.B04) / (s.B08 + s.B04 + 0.0001);
   if (ndvi < 0.0) return [0.5, 0.0, 0.0, 1];
   if (ndvi < 0.2) return [0.8, 0.2, 0.1, 1];
   if (ndvi < 0.4) return [0.9, 0.6, 0.2, 1];
@@ -328,7 +342,7 @@ function setup() {
   return { input: ["B08", "B04", "B03", "SCL"], output: { bands: 4 } };
 }
 function evaluatePixel(s) {
-  if (s.SCL === 3 || s.SCL === 8 || s.SCL === 9 || s.SCL === 10) return [0,0,0,0];
+  if (s.SCL === 3 || s.SCL === 8 || s.SCL === 9 || s.SCL === 10 || s.SCL === 11) return [0,0,0,0];
   return [s.B08*2.5, s.B04*3.5, s.B03*3.5, 1];
 }`,
       ndmiMoisture: `
@@ -337,8 +351,8 @@ function setup() {
   return { input: ["B08", "B11", "SCL"], output: { bands: 4 } };
 }
 function evaluatePixel(s) {
-  if (s.SCL === 3 || s.SCL === 8 || s.SCL === 9 || s.SCL === 10) return [0,0,0,0];
-  let ndmi = (s.B08 - s.B11) / (s.B08 + s.B11);
+  if (s.SCL === 3 || s.SCL === 8 || s.SCL === 9 || s.SCL === 10 || s.SCL === 11) return [0,0,0,0];
+  let ndmi = (s.B08 - s.B11) / (s.B08 + s.B11 + 0.0001);
   if (ndmi < 0.0) return [0.8, 0.4, 0.1, 1];
   if (ndmi < 0.1) return [0.9, 0.7, 0.3, 1];
   if (ndmi < 0.2) return [0.7, 0.9, 0.7, 1];

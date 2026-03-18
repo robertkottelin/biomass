@@ -86,6 +86,10 @@ app.use('/api/stripe', stripeRoutes);
 app.use('/api/forests', forestRoutes);
 app.use('/api/sample-data', sampleRoutes);
 
+// ── Blog (server-rendered, must come before SPA catch-all) ───────────
+const blogRoutes = require('./routes/blog');
+app.use('/blog', blogRoutes);
+
 // ── Serve React build ─────────────────────────────────────────────────
 const buildPath = path.resolve(__dirname, '..', 'forest-biomass-analyzer', 'build');
 if (fs.existsSync(buildPath)) {

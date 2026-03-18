@@ -9,4 +9,13 @@ module.exports = function(app) {
       changeOrigin: true,
     })
   );
+
+  // Proxy blog routes to Express (server-rendered HTML)
+  app.use(
+    '/blog',
+    createProxyMiddleware({
+      target: 'http://localhost:3001',
+      changeOrigin: true,
+    })
+  );
 };

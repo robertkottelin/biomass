@@ -163,8 +163,8 @@ function VegetationStatistics({ data, loading }) {
 
   // --- Histogram data for selected date ---
   const histogramData = useMemo(() => {
-    if (!entries[selectedDateIdx]) return [];
-    const bins = entries[selectedDateIdx].outputs.ndvi.bands.B0.histogram.bins;
+    const bins = entries[selectedDateIdx]?.outputs?.ndvi?.bands?.B0?.histogram?.bins;
+    if (!bins) return [];
     return bins.map((b) => ({
       range: `${b.lowEdge.toFixed(2)}`,
       count: b.count,
@@ -175,8 +175,8 @@ function VegetationStatistics({ data, loading }) {
 
   // --- Vegetation class breakdown for selected date ---
   const vegBreakdown = useMemo(() => {
-    if (!entries[selectedDateIdx]) return [];
-    const bins = entries[selectedDateIdx].outputs.ndvi.bands.B0.histogram.bins;
+    const bins = entries[selectedDateIdx]?.outputs?.ndvi?.bands?.B0?.histogram?.bins;
+    if (!bins) return [];
     const totals = vegClasses.map((vc) => ({ ...vc, count: 0 }));
     let total = 0;
     for (const bin of bins) {

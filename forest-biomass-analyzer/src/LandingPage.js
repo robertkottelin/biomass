@@ -126,6 +126,7 @@ export default function LandingPage() {
             <button style={s.navLink} onClick={() => scrollTo('features')} type="button">Features</button>
             <button style={s.navLink} onClick={() => scrollTo('pricing')} type="button">Pricing</button>
             <button style={s.navLink} onClick={() => scrollTo('faq')} type="button">FAQ</button>
+            <a href="/blog" style={s.navLink}>Blog</a>
             {user ? (
               <button style={s.navCta} onClick={() => navigate('/app')} type="button">
                 Go to Dashboard
@@ -509,6 +510,7 @@ export default function LandingPage() {
             <button style={s.footerLink} onClick={() => scrollTo('features')} type="button">Features</button>
             <button style={s.footerLink} onClick={() => scrollTo('pricing')} type="button">Pricing</button>
             <button style={s.footerLink} onClick={() => scrollTo('faq')} type="button">FAQ</button>
+            <a href="/blog" style={s.footerLink}>Blog</a>
             <button style={s.footerLink} onClick={() => navigate('/login')} type="button">Login</button>
           </div>
           <div style={s.footerCopy}>
